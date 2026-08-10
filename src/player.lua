@@ -75,7 +75,7 @@ function Player.new(startTX, startTY)
 end
 
 function Player:loadSprites()
-    self.spriteImage = love.graphics.newImage("assets/sprites/player.png")
+    self.spriteImage = love.graphics.newImage("assets/sprites/sprout_lands/characters.png")
     self.spriteImage:setFilter("nearest", "nearest")
     
     local directions = { "down", "up", "left", "right" }
@@ -83,8 +83,8 @@ function Player:loadSprites()
         self.spriteQuads[dir] = {}
         for col = 0, 3 do
             self.spriteQuads[dir][col] = love.graphics.newQuad(
-                col * TILE_SIZE, (row - 1) * TILE_SIZE,
-                TILE_SIZE, TILE_SIZE,
+                col * 48, (row - 1) * 48,
+                48, 48,
                 self.spriteImage:getDimensions()
             )
         end
@@ -223,7 +223,7 @@ function Player:update(dt, input, tilemap)
         self.walkTimer = self.walkTimer + dt
         if self.walkTimer >= 0.15 then
             self.walkTimer = 0
-            self.walkFrame = (self.walkFrame % 2) + 1  -- alternate between 1 and 2
+            self.walkFrame = (self.walkFrame + 1) % 4
         end
     else
         self.walkFrame = 0
@@ -396,8 +396,8 @@ function Player:cycleSeedType()
     end
 end
 
---- Draw the player sprite.
-function Player:draw()
+--- Queue the player for Y-sorted rendering.
+function Player:queueRender(renderQueue)
     if not self.spriteImage then return end
     
     local frame = self.walkFrame
@@ -407,10 +407,16 @@ function Player:draw()
     
     local quad = self.spriteQuads[self.facing]
     if quad and quad[frame] then
-        love.graphics.draw(
-            self.spriteImage, quad[frame],
-            self.x - TILE_SIZE / 2, self.y - TILE_SIZE / 2
-        )
+        table.insert(renderQueue, {
+            y = self.y,
+            draw = function()
+                -- Draw 48x48 sprite centered. Offset by -24, -32 so feet align with TILE_SIZE center
+                love.graphics.draw(
+                    self.spriteImage, quad[frame],
+                    self.x - 24, self.y - 32
+                )
+            end
+        })
     end
 end
 

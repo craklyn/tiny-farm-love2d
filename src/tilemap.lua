@@ -56,29 +56,49 @@ end
 
 --- Initialize the tilemap with obstacles and fixed objects.
 function Tilemap:init()
-    -- Load spritesheet
-    self.tilesetImage = love.graphics.newImage("assets/sprites/tiles.png")
+    -- Load spritesheets
+    self.tilesetImage = love.graphics.newImage("assets/sprites/sprout_lands/grass.png")
     self.tilesetImage:setFilter("nearest", "nearest")
-    self.cropsImage = love.graphics.newImage("assets/sprites/crops.png")
+    self.dirtImage = love.graphics.newImage("assets/sprites/sprout_lands/dirt.png")
+    self.dirtImage:setFilter("nearest", "nearest")
+    self.cropsImage = love.graphics.newImage("assets/sprites/sprout_lands/crops.png")
     self.cropsImage:setFilter("nearest", "nearest")
-    self.objectsImage = love.graphics.newImage("assets/sprites/objects.png")
+    self.objectsImage = love.graphics.newImage("assets/sprites/sprout_lands/tools.png")
     self.objectsImage:setFilter("nearest", "nearest")
     
-    -- Create tile quads (8 columns x 1 row)
-    local tileNames = { "border", "obstacle_rock", "obstacle_log", "obstacle_weed",
-                        "cleared", "tilled", "watered_tilled", "grass" }
-    for i, name in ipairs(tileNames) do
-        self.tileQuads[name] = love.graphics.newQuad(
-            (i - 1) * TILE_SIZE, 0, TILE_SIZE, TILE_SIZE,
-            self.tilesetImage:getDimensions()
-        )
+    -- Create grass/dirt quads dynamically during draw using BITMASK_MAP
+    self.BITMASK_MAP = {
+        [0] = {3,0}, [1] = {3,2}, [2] = {0,3}, [3] = {0,2},
+        [4] = {3,1}, [5] = {3,3}, [6] = {0,0}, [7] = {0,1},
+        [8] = {2,3}, [9] = {2,2}, [10] = {1,3}, [11] = {1,2},
+        [12] = {2,0}, [13] = {2,1}, [14] = {1,0}, [15] = {1,1}
+    }
+    
+    -- Pre-cache the 16 quads for grass and dirt
+    self.grassQuads = {}
+    self.dirtQuads = {}
+    self.wateredDirtQuads = {}
+    
+    local tw, th = self.tilesetImage:getDimensions()
+    local dw, dh = self.dirtImage:getDimensions()
+    for mask = 0, 15 do
+        local cx = self.BITMASK_MAP[mask][1]
+        local cy = self.BITMASK_MAP[mask][2]
+        self.grassQuads[mask] = love.graphics.newQuad(cx * TILE_SIZE, cy * TILE_SIZE, TILE_SIZE, TILE_SIZE, tw, th)
+        self.dirtQuads[mask] = love.graphics.newQuad(cx * TILE_SIZE, cy * TILE_SIZE, TILE_SIZE, TILE_SIZE, dw, dh)
+        self.wateredDirtQuads[mask] = love.graphics.newQuad((cx + 4) * TILE_SIZE, cy * TILE_SIZE, TILE_SIZE, TILE_SIZE, dw, dh)
     end
     
     -- Create crop quads (4 columns x 3 rows)
+    -- Carrots: row 1, Tomato: row 3, Sunflower: row 4 in crops.png
+    self.cropQuads = {}
     for _, cropName in ipairs(Crops.ORDER) do
         self.cropQuads[cropName] = {}
-        local row = Crops.TYPES[cropName].spriteRow
-        for stage = 0, 3 do
+        local row = 0
+        if cropName == "carrot" then row = 1
+        elseif cropName == "tomato" then row = 3
+        elseif cropName == "sunflower" then row = 4 end
+        for stage = 0, 5 do
             self.cropQuads[cropName][stage] = love.graphics.newQuad(
                 stage * TILE_SIZE, row * TILE_SIZE, TILE_SIZE, TILE_SIZE,
                 self.cropsImage:getDimensions()
@@ -86,14 +106,24 @@ function Tilemap:init()
         end
     end
     
-    -- Create object quads (4 columns x 1 row)
+    -- Create object quads (Temporary tool mapping)
     local objNames = { "cot", "shipping_bin", "well", "seed_box" }
     for i, name in ipairs(objNames) do
         self.objectQuads[name] = love.graphics.newQuad(
-            (i - 1) * TILE_SIZE, 0, TILE_SIZE, TILE_SIZE,
+            ((i - 1) % 6) * 16, math.floor((i-1)/6)*16, TILE_SIZE, TILE_SIZE,
             self.objectsImage:getDimensions()
         )
     end
+    
+    -- Load biomes (obstacles)
+    self.biomesImage = love.graphics.newImage("assets/sprites/sprout_lands/biomes.png")
+    self.biomesImage:setFilter("nearest", "nearest")
+    self.biomeQuads = {
+        obstacle_rock = love.graphics.newQuad(5 * 16, 4 * 16, 16, 16, self.biomesImage:getDimensions()),
+        obstacle_log  = love.graphics.newQuad(4 * 16, 2 * 16, 16, 16, self.biomesImage:getDimensions()),
+        obstacle_weed = love.graphics.newQuad(0 * 16, 0 * 16, 16, 16, self.biomesImage:getDimensions()),
+        border        = love.graphics.newQuad(0 * 16, 0 * 16, 16, 16, self.biomesImage:getDimensions())
+    }
     
     -- Initialize tile grid
     self.objects = {}
@@ -249,47 +279,93 @@ function Tilemap:advanceDay()
     end
 end
 
---- Draw the tilemap.
--- @param camera Camera (unused directly - camera transform is already applied)
-function Tilemap:draw()
-    -- Draw base tiles
+--- Draw only base tiles (grass and dirt).
+function Tilemap:drawBaseTiles()
     for ty = 1, self.HEIGHT do
         for tx = 1, self.WIDTH do
             local tile = self.tiles[ty][tx]
             local px = (tx - 1) * TILE_SIZE
             local py = (ty - 1) * TILE_SIZE
             
-            -- Choose tile quad based on state
-            local quadName = tile.state
-            if tile.state == "seeded" or tile.state == "growing" or tile.state == "ready" then
-                -- Draw tilled soil underneath crops
+            -- Draw Grass background always
+            local grassMask = 0
+            if ty > 1 then grassMask = grassMask + 1 end
+            if tx < self.WIDTH then grassMask = grassMask + 2 end
+            if ty < self.HEIGHT then grassMask = grassMask + 4 end
+            if tx > 1 then grassMask = grassMask + 8 end
+            -- Just draw full grass for the base
+            love.graphics.draw(self.tilesetImage, self.grassQuads[15], px, py)
+            
+            -- Draw Tilled Dirt if applicable
+            local state = tile.state
+            if state == "tilled" or state == "seeded" or state == "growing" or state == "ready" then
+                -- Calculate 4-way bitmask for dirt
+                local mask = 0
+                local function isDirt(nx, ny)
+                    local ntile = self:getTile(nx, ny)
+                    if not ntile then return false end
+                    local s = ntile.state
+                    return s == "tilled" or s == "seeded" or s == "growing" or s == "ready"
+                end
+                if ty > 1 and isDirt(tx, ty-1) then mask = mask + 1 end
+                if tx < self.WIDTH and isDirt(tx+1, ty) then mask = mask + 2 end
+                if ty < self.HEIGHT and isDirt(tx, ty+1) then mask = mask + 4 end
+                if tx > 1 and isDirt(tx-1, ty) then mask = mask + 8 end
+                
                 if tile.wateredToday then
-                    quadName = "watered_tilled"
+                    love.graphics.draw(self.dirtImage, self.wateredDirtQuads[mask], px, py)
                 else
-                    quadName = "tilled"
-                end
-            elseif tile.state == "tilled" and tile.wateredToday then
-                quadName = "watered_tilled"
-            end
-            
-            local quad = self.tileQuads[quadName]
-            if quad then
-                love.graphics.draw(self.tilesetImage, quad, px, py)
-            end
-            
-            -- Draw crops on top
-            if tile.state == "seeded" or tile.state == "growing" or tile.state == "ready" then
-                local visualStage = Crops.getVisualStage(tile.cropType, tile.growthStage)
-                local cropQuad = self.cropQuads[tile.cropType]
-                if cropQuad and cropQuad[visualStage] then
-                    love.graphics.draw(self.cropsImage, cropQuad[visualStage], px, py)
+                    love.graphics.draw(self.dirtImage, self.dirtQuads[mask], px, py)
                 end
             end
+        end
+    end
+end
+
+--- Queue crops and objects for Y-sorted rendering.
+function Tilemap:queueEntities(renderQueue)
+    for ty = 1, self.HEIGHT do
+        for tx = 1, self.WIDTH do
+            local tile = self.tiles[ty][tx]
+            local px = (tx - 1) * TILE_SIZE
+            local py = (ty - 1) * TILE_SIZE
             
-            -- Draw objects
+            -- Queue crops
+            local state = tile.state
+            if state == "seeded" or state == "growing" or state == "ready" then
+                table.insert(renderQueue, {
+                    y = py, -- Base Y for sorting
+                    draw = function()
+                        local visualStage = Crops.getVisualStage(tile.cropType, tile.growthStage)
+                        local cropQuad = self.cropQuads[tile.cropType]
+                        if cropQuad and cropQuad[visualStage] then
+                            love.graphics.draw(self.cropsImage, cropQuad[visualStage], px, py)
+                        end
+                    end
+                })
+            end
+            
+            -- Queue obstacles
+            if state == "border" or state == "obstacle_rock" or state == "obstacle_log" or state == "obstacle_weed" then
+                if self.biomeQuads[state] then
+                    table.insert(renderQueue, {
+                        y = py,
+                        draw = function()
+                            love.graphics.draw(self.biomesImage, self.biomeQuads[state], px, py)
+                        end
+                    })
+                end
+            end
+            
+            -- Queue objects
             local obj = self:getObject(tx, ty)
             if obj and self.objectQuads[obj] then
-                love.graphics.draw(self.objectsImage, self.objectQuads[obj], px, py)
+                table.insert(renderQueue, {
+                    y = py, -- Objects have height
+                    draw = function()
+                        love.graphics.draw(self.objectsImage, self.objectQuads[obj], px, py)
+                    end
+                })
             end
         end
     end

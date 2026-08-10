@@ -134,11 +134,23 @@ function love.draw()
     -- === World rendering (in camera space) ===
     camera:apply()
     
-    -- Draw tilemap (ground + crops + objects)
-    tilemap:draw()
+    -- Draw base tiles (grass, dirt)
+    tilemap:drawBaseTiles()
     
-    -- Draw player
-    player:draw()
+    -- Y-Sort Render Queue for crops, objects, and player
+    local renderQueue = {}
+    tilemap:queueEntities(renderQueue)
+    player:queueRender(renderQueue)
+    
+    -- Sort entities by Y coordinate
+    table.sort(renderQueue, function(a, b)
+        return a.y < b.y
+    end)
+    
+    -- Draw sorted entities
+    for _, entity in ipairs(renderQueue) do
+        entity.draw()
+    end
     
     -- Draw particles
     particles:draw()

@@ -12,7 +12,9 @@ function Particles.new()
 end
 
 function Particles:init()
-    self.particleImage = love.graphics.newImage("assets/sprites/particle.png")
+    local imgData = love.image.newImageData(2, 2)
+    imgData:mapPixel(function() return 1, 1, 1, 1 end)
+    self.particleImage = love.graphics.newImage(imgData)
     self.particleImage:setFilter("nearest", "nearest")
     
     -- Dirt burst (tilling)
