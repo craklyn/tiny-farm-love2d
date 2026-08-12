@@ -27,7 +27,16 @@ function Input.new()
     self.mouseClicked = false
     self.mouseRightClicked = false
     self.scrollDelta = 0
-    
+
+    -- Swipe/drag chain state (touch)
+    self.swipeActive = false      -- true while a finger is held and dragging
+    self.swipeTileX  = nil        -- current tile under dragging finger
+    self.swipeTileY  = nil
+    self._swipeMoved = false      -- set when finger moves to a new tile this frame
+    self._swipeScreenX = nil
+    self._swipeScreenY = nil
+    self._touchReleased = false
+
     -- Gamepad
     self.joystick = nil
     self.deadzone = 0.3
@@ -74,7 +83,36 @@ end
 --- Call from love.touchpressed
 function Input:onTouchPressed(id, x, y)
     self._mouseClickPos = { x = x, y = y }
+    self.swipeActive   = false
+    self._swipeScreenX = x
+    self._swipeScreenY = y
     self.mode = "mouse"
+end
+
+--- Call from love.touchmoved
+function Input:onTouchMoved(id, x, y, camera)
+    self.mode = "mouse"
+    local newTX, newTY
+    if camera then
+        newTX, newTY = camera:screenToTile(x, y)
+    end
+    -- Only flag a swipe-move when the finger crosses into a new tile
+    if newTX and newTY and (newTX ~= self.swipeTileX or newTY ~= self.swipeTileY) then
+        self.swipeActive   = true
+        self.swipeTileX    = newTX
+        self.swipeTileY    = newTY
+        self._swipeScreenX = x
+        self._swipeScreenY = y
+        self._swipeMoved   = true
+    end
+end
+
+--- Call from love.touchreleased
+function Input:onTouchReleased(id, x, y)
+    self.swipeActive   = false
+    self.swipeTileX    = nil
+    self.swipeTileY    = nil
+    self._touchReleased = true
 end
 
 --- Update input state. Call once per frame at the start of love.update.
@@ -92,6 +130,8 @@ function Input:update(dt, camera)
     self.scrollDelta = 0
     self.moveX = 0
     self.moveY = 0
+    self._swipeMoved    = false
+    self._touchReleased = false
     
     -- === Keyboard ===
     if love.keyboard.isDown("w") or love.keyboard.isDown("up") then

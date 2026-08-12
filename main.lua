@@ -1,19 +1,23 @@
 -- main.lua: Tiny Farm - Entry point
 -- Wires all game systems together: load, update, draw, input routing
 
-local Camera = require("src.camera")
-local Input = require("src.input")
-local Tilemap = require("src.tilemap")
-local Player = require("src.player")
-local Particles = require("src.particles")
-local DayCycle = require("src.day_cycle")
-local HUD = require("src.hud")
-local UIMenus = require("src.ui_menus")
-local Tools = require("src.tools")
-local Crops = require("src.crops")
+local Camera       = require("src.camera")
+local Input        = require("src.input")
+local Tilemap      = require("src.tilemap")
+local Player       = require("src.player")
+local Particles    = require("src.particles")
+local DayCycle     = require("src.day_cycle")
+local HUD          = require("src.hud")
+local UIMenus      = require("src.ui_menus")
+local Tools        = require("src.tools")
+local Crops        = require("src.crops")
+local ActionRouter = require("src.action_router")
+
+local AudioManager = require("src.audio_manager")
+local TitleScreen  = require("src.title_screen")
 
 -- Game state
-local gameState = "playing"  -- "playing", "menu"
+local gameState = "title"  -- "title", "playing"
 local camera, input, tilemap, player, particles, dayCycle, hud, uiMenus
 
 function love.load()
@@ -49,9 +53,17 @@ function love.load()
     hud:init()
     
     uiMenus = UIMenus.new()
+    
+    AudioManager.init()
+    TitleScreen.init()
 end
 
 function love.update(dt)
+    if gameState == "title" then
+        TitleScreen.update(dt)
+        return
+    end
+
     -- Update input
     input:update(dt, camera)
     
@@ -89,10 +101,26 @@ function love.update(dt)
         return
     end
     
-    -- Player movement
+    -- Player movement & path following
     player:update(dt, input, tilemap)
-    
-    -- Action
+
+    -- === Check for queued results from pathfinding-triggered actions ===
+    if player._queuedResult then
+        local result = player._queuedResult
+        player._queuedResult = nil
+        if result == "sleep" then
+            dayCycle:setDayDisplay(player.day + 1)
+            dayCycle:startSleep(function()
+                tilemap:advanceDay()
+                player:processShippingBin()
+                player:startNewDay()
+            end)
+        elseif result == "open_shop" then
+            uiMenus:open("shop", player)
+        end
+    end
+
+    -- === Keyboard/gamepad Action button ===
     if input.actionPressed and not player.isActing then
         local action = player:tryAction(tilemap, particles)
         
@@ -112,25 +140,50 @@ function love.update(dt)
             hud:checkMilestones(player)
         end
     end
-    
-    -- Seed type cycling (when Seeds tool is selected)
+
+    -- === Swipe-chain: apply action to each new tile the finger enters ===
+    if input.swipeActive and input._swipeMoved then
+        local stx, sty = input.swipeTileX, input.swipeTileY
+        local ptx, pty = player:getTilePos()
+        local resolved = ActionRouter.resolve(tilemap, player, stx, sty, ptx, pty)
+        -- Only chain-able actions (no sleep/shop/sell during swipe)
+        local chainable = { water = true, plant = true, till = true, harvest = true,
+                            clear_weed = true, clear_log = true, clear_rock = true }
+        if resolved and chainable[resolved.action] then
+            -- Immediately face the target tile (no pathfinding during swipe)
+            local fdx = stx - ptx
+            local fdy = sty - pty
+            if math.abs(fdx) >= math.abs(fdy) then
+                player.facing = fdx > 0 and "right" or "left"
+            else
+                player.facing = fdy > 0 and "down" or "up"
+            end
+            player:_executeResolvedAction(resolved, tilemap, particles)
+            hud:checkMilestones(player)
+        end
+    end
+
+    -- Seed type cycling when Seeds tool active (keyboard)
     local currentTool = Tools.LIST[player.selectedTool]
     if currentTool and currentTool.name == "Seeds" then
-        -- Use inventory key to cycle seed type when Seeds tool is active
-        -- Or auto-select the seed type that has stock
         if input.inventoryPressed then
             player:cycleSeedType()
         end
     end
-    
+
     -- Update camera to follow player
     camera:update(dt, player.x, player.y)
-    
+
     -- Update particles
     particles:update(dt)
 end
 
 function love.draw()
+    if gameState == "title" then
+        TitleScreen.draw()
+        return
+    end
+
     -- === World rendering (in camera space) ===
     camera:apply()
     
@@ -180,6 +233,11 @@ end
 -- === Input Callbacks ===
 
 function love.keypressed(key)
+    if gameState == "title" then
+        gameState = TitleScreen.keypressed(key)
+        return
+    end
+
     input:onKeyPressed(key)
     
     -- Menu navigation
@@ -200,6 +258,12 @@ function love.keypressed(key)
 end
 
 function love.gamepadpressed(joystick, button)
+    if gameState == "title" then
+        -- Map gamepad buttons to generic keypress for title screen
+        gameState = TitleScreen.keypressed("return")
+        return
+    end
+
     input:onGamepadPressed(joystick, button)
     
     if uiMenus:isOpen() then
@@ -208,21 +272,72 @@ function love.gamepadpressed(joystick, button)
 end
 
 function love.mousepressed(x, y, button)
-    input:onMousePressed(x, y, button)
-    
+    if gameState == "title" then
+        gameState = TitleScreen.mousepressed(x, y, button)
+        if gameState == "game" then input.hasClick = false end
+        return
+    end
+
+    -- Seed pill tap: cycle seed type
+    if button == 1 and hud.seedPillBounds then
+        local b = hud.seedPillBounds
+        if x >= b.x and x <= b.x + b.w and y >= b.y and y <= b.y + b.h then
+            player:cycleSeedType()
+            AudioManager.playSfx("click")
+            return  -- Consume tap
+        end
+    end
+
     -- Menu mouse handling
     if uiMenus:isOpen() and button == 1 then
         local result = uiMenus:onMouseClick(x, y, player)
         if result == "quit" then
             love.event.quit()
         end
+        return -- Consume the click
     end
+
+    input:onMousePressed(x, y, button)
 end
 
 function love.wheelmoved(x, y)
+    if gameState == "title" then return end
     input:onWheelMoved(x, y)
 end
 
 function love.touchpressed(id, x, y, dx, dy, pressure)
+    if gameState == "title" then
+        gameState = TitleScreen.mousepressed(x, y, 1)
+        return
+    end
+
+    -- Seed pill tap
+    if hud.seedPillBounds then
+        local b = hud.seedPillBounds
+        if x >= b.x and x <= b.x + b.w and y >= b.y and y <= b.y + b.h then
+            player:cycleSeedType()
+            AudioManager.playSfx("click")
+            return
+        end
+    end
+
+    -- Menu tap
+    if uiMenus:isOpen() then
+        local result = uiMenus:onMouseClick(x, y, player)
+        if result == "quit" then love.event.quit() end
+        return
+    end
+
     input:onTouchPressed(id, x, y)
+end
+
+function love.touchmoved(id, x, y, dx, dy, pressure)
+    if gameState ~= "game" then return end
+    if uiMenus:isOpen() then return end
+    input:onTouchMoved(id, x, y, camera)
+end
+
+function love.touchreleased(id, x, y, dx, dy, pressure)
+    if gameState ~= "game" then return end
+    input:onTouchReleased(id, x, y)
 end

@@ -1,7 +1,8 @@
 -- hud.lua: Heads-up display overlay rendering
 
-local Tools = require("src.tools")
-local Crops = require("src.crops")
+local Tools        = require("src.tools")
+local Crops        = require("src.crops")
+local ActionRouter = require("src.action_router")
 
 local HUD = {}
 HUD.__index = HUD
@@ -170,6 +171,34 @@ function HUD:draw(player, tilemap, camera, input)
     local wtw = font:getWidth(waterText)
     love.graphics.setColor(0.4, 0.7, 0.95, 1)
     love.graphics.print(waterText, sw - wtw - 10, bottomY + 8)
+
+    -- === Active Seed Pill (touch-first: always visible, tap to cycle) ===
+    local seedName = player.selectedSeedType
+    local seedCount = player.seeds[seedName] or 0
+    local seedEmoji = ({ carrot = "🥕", tomato = "🍅", sunflower = "🌻" })[seedName] or "?"
+    local pillText = string.format("%s %s x%d", seedEmoji, seedName, seedCount)
+    local pillW = font:getWidth(pillText) + 24
+    local pillH = fh + 10
+    local pillX = sw / 2 - pillW / 2
+    local pillY = bottomY - pillH - 6
+
+    -- Pill background (greener when seeds are available, grey if empty)
+    if seedCount > 0 then
+        love.graphics.setColor(0.18, 0.52, 0.22, 0.88)
+    else
+        love.graphics.setColor(0.25, 0.25, 0.25, 0.75)
+    end
+    love.graphics.rectangle("fill", pillX, pillY, pillW, pillH, pillH/2, pillH/2)
+    -- Border
+    love.graphics.setColor(1, 1, 1, 0.3)
+    love.graphics.setLineWidth(1)
+    love.graphics.rectangle("line", pillX, pillY, pillW, pillH, pillH/2, pillH/2)
+    -- Text
+    love.graphics.setColor(1, 1, 0.9, 1)
+    love.graphics.print(pillText, pillX + 12, pillY + 5)
+
+    -- Store pill bounds for touch detection in main.lua
+    self.seedPillBounds = { x = pillX, y = pillY, w = pillW, h = pillH }
     
     -- === Tile Cursor (mouse mode) ===
     if input.mode == "mouse" then
@@ -196,26 +225,19 @@ end
 function HUD:_drawTileCursor(player, tilemap, camera, input)
     local mtx, mty = input:getMouseTile(camera)
     if not mtx or not mty then return end
-    
+
     local tile = tilemap:getTile(mtx, mty)
     if not tile then return end
-    
-    -- Determine cursor color
-    local r, g, b = 1, 1, 1  -- white (neutral)
-    
-    local action = Tools.getAction(player.selectedTool, tile.state)
-    if action then
-        r, g, b = 0.2, 0.9, 0.3  -- green (valid action)
-    elseif tile.state == "border" or tile.state:find("obstacle") then
-        r, g, b = 0.9, 0.3, 0.2  -- red (blocked)
-    end
-    
+
+    -- Use ActionRouter for smart cursor coloring
+    local r, g, b = ActionRouter.getCursorColor(tilemap, player, mtx, mty)
+
     -- Draw cursor in world space
     local tileScreenSize = camera:getTileScreenSize()
     local sx, sy = camera:tileToScreen(mtx, mty)
     sx = sx - tileScreenSize / 2
     sy = sy - tileScreenSize / 2
-    
+
     love.graphics.setColor(r, g, b, 0.6)
     love.graphics.setLineWidth(2)
     love.graphics.rectangle("line", sx, sy, tileScreenSize, tileScreenSize)

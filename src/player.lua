@@ -1,7 +1,10 @@
 -- player.lua: Player entity with movement, facing, inventory, and action execution
 
-local Tools = require("src.tools")
-local Crops = require("src.crops")
+local Tools        = require("src.tools")
+local Crops        = require("src.crops")
+local AudioManager = require("src.audio_manager")
+local Pathfinding  = require("src.pathfinding")
+local ActionRouter = require("src.action_router")
 
 local Player = {}
 Player.__index = Player
@@ -63,10 +66,20 @@ function Player.new(startTX, startTY)
         sunflower = 0,
     }
     
-    -- Click-to-move
+    -- Click-to-move (legacy pixel target, now replaced by path queue)
     self.moveTargetX = nil
     self.moveTargetY = nil
-    
+
+    -- A* path queue: list of {tx, ty} waypoints
+    self.path = {}
+    -- Action to execute automatically on arrival at path destination
+    -- { toolIndex, action, targetTX, targetTY, seedType }
+    self.pendingAction = nil
+
+    -- Tap-destination visual: { tx, ty, timer }
+    self.tapIndicator = nil
+    self.TAP_INDICATOR_DURATION = 0.6
+
     -- Spritesheet
     self.spriteImage = nil
     self.spriteQuads = {}  -- [direction][frame]
@@ -112,11 +125,19 @@ function Player:getFacingTile()
 end
 
 --- Update player movement and animation.
--- @param dt number: delta time
--- @param input Input: input state
--- @param tilemap Tilemap: for collision checking
+-- @param dt      number  delta time
+-- @param input   Input   input state
+-- @param tilemap Tilemap for collision & pathfinding
 function Player:update(dt, input, tilemap)
-    -- Action animation lock
+    -- ── Tap-indicator timer ───────────────────────────────────────────────
+    if self.tapIndicator then
+        self.tapIndicator.timer = self.tapIndicator.timer - dt
+        if self.tapIndicator.timer <= 0 then
+            self.tapIndicator = nil
+        end
+    end
+
+    -- ── Action animation lock ─────────────────────────────────────────────
     if self.isActing then
         self.actionTimer = self.actionTimer - dt
         if self.actionTimer <= 0 then
@@ -124,43 +145,115 @@ function Player:update(dt, input, tilemap)
         end
         return  -- Can't move during action
     end
-    
+
     local dx, dy = 0, 0
-    
-    -- Check for click-to-move
+
+    -- ── Touch/mouse tap → pathfind ────────────────────────────────────────
     if input.mode == "mouse" and input.mouseClicked then
-        -- Check if click is on an adjacent tile (perform action) or far tile (move toward it)
-        local ptx, pty = self:getTilePos()
         local ctx, cty = input.clickTileX, input.clickTileY
         if ctx and cty then
-            local adx = math.abs(ctx - ptx)
-            local ady = math.abs(cty - pty)
-            if adx <= 1 and ady <= 1 and not (adx == 0 and ady == 0) then
-                -- Adjacent tile: face it and try action
-                if ctx > ptx then self.facing = "right"
-                elseif ctx < ptx then self.facing = "left"
-                elseif cty > pty then self.facing = "down"
-                elseif cty < pty then self.facing = "up"
+            local ptx, pty = self:getTilePos()
+
+            -- Resolve what action this tap should produce
+            local resolved = ActionRouter.resolve(tilemap, self, ctx, cty, ptx, pty)
+
+            -- Determine actual walk destination
+            local goalTX, goalTY = ctx, cty
+
+            -- Find path
+            local newPath = Pathfinding.findPath(tilemap, ptx, pty, goalTX, goalTY)
+            if newPath then
+                self.path = newPath
+                -- Store tap indicator
+                local finalStep = newPath[#newPath]
+                local indTX = finalStep and finalStep.tx or ctx
+                local indTY = finalStep and finalStep.ty or cty
+                self.tapIndicator = { tx = indTX, ty = indTY, timer = self.TAP_INDICATOR_DURATION }
+
+                -- If there's an action on arrival, store it
+                if resolved then
+                    if #newPath == 0 then
+                        local dist = math.abs(ptx - ctx) + math.abs(pty - cty)
+                        if dist <= 1 then
+                            local pa = {
+                                toolIndex = resolved.toolIndex,
+                                action    = resolved.action,
+                                targetTX  = resolved.targetTX,
+                                targetTY  = resolved.targetTY,
+                                seedType  = resolved.seedType,
+                            }
+                            local faceDX = pa.targetTX - ptx
+                            local faceDY = pa.targetTY - pty
+                            if faceDX ~= 0 or faceDY ~= 0 then
+                                if math.abs(faceDX) >= math.abs(faceDY) then
+                                    self.facing = faceDX > 0 and "right" or "left"
+                                else
+                                    self.facing = faceDY > 0 and "down" or "up"
+                                end
+                            end
+                            self:_executeResolvedAction(pa, tilemap, nil)
+                        end
+                        self.pendingAction = nil
+                    else
+                        self.pendingAction = {
+                            toolIndex = resolved.toolIndex,
+                            action    = resolved.action,
+                            targetTX  = resolved.targetTX,
+                            targetTY  = resolved.targetTY,
+                            seedType  = resolved.seedType,
+                        }
+                    end
+                else
+                    self.pendingAction = nil
                 end
-                input.actionPressed = true
-                self.moveTargetX = nil
-                self.moveTargetY = nil
-            else
-                -- Far tile: set move target
-                self.moveTargetX = (ctx - 1) * TILE_SIZE + TILE_SIZE / 2
-                self.moveTargetY = (cty - 1) * TILE_SIZE + TILE_SIZE / 2
             end
         end
     end
-    
-    -- Movement from keyboard/gamepad
+
+    -- ── Keyboard / gamepad movement (cancels path) ────────────────────────
     if input.moveX ~= 0 or input.moveY ~= 0 then
         dx = input.moveX
         dy = input.moveY
+        self.path = {}
+        self.pendingAction = nil
         self.moveTargetX = nil
         self.moveTargetY = nil
+    elseif #self.path > 0 then
+        -- ── Follow waypoint path ──────────────────────────────────────────
+        local wp = self.path[1]
+        local wpWorldX = (wp.tx - 1) * TILE_SIZE + TILE_SIZE / 2
+        local wpWorldY = (wp.ty - 1) * TILE_SIZE + TILE_SIZE / 2
+        local tdx = wpWorldX - self.x
+        local tdy = wpWorldY - self.y
+        local dist = math.sqrt(tdx * tdx + tdy * tdy)
+
+        if dist < 2 then
+            -- Arrived at this waypoint, move to next
+            table.remove(self.path, 1)
+            if #self.path == 0 then
+                -- Path finished — execute pending action if any
+                if self.pendingAction then
+                    local pa = self.pendingAction
+                    self.pendingAction = nil
+                    -- Face the target tile
+                    local myTX, myTY = self:getTilePos()
+                    local faceDX = pa.targetTX - myTX
+                    local faceDY = pa.targetTY - myTY
+                    if math.abs(faceDX) >= math.abs(faceDY) then
+                        self.facing = faceDX > 0 and "right" or "left"
+                    else
+                        self.facing = faceDY > 0 and "down" or "up"
+                    end
+                    -- Trigger the action
+                    self:_executeResolvedAction(pa, tilemap, nil)
+                end
+            end
+        else
+            dx = tdx / dist
+            dy = tdy / dist
+        end
     elseif self.moveTargetX and self.moveTargetY then
-        -- Click-to-move: move toward target
+        -- Legacy pixel target (kept for gamepad compatibility)
         local tdx = self.moveTargetX - self.x
         local tdy = self.moveTargetY - self.y
         local dist = math.sqrt(tdx * tdx + tdy * tdy)
@@ -172,8 +265,8 @@ function Player:update(dt, input, tilemap)
             dy = tdy / dist
         end
     end
-    
-    -- Apply movement
+
+    -- ── Apply movement ────────────────────────────────────────────────────
     self.isMoving = (dx ~= 0 or dy ~= 0)
     
     if self.isMoving then
@@ -195,7 +288,7 @@ function Player:update(dt, input, tilemap)
         local newX = self.x + dx * MOVE_SPEED * dt
         local newY = self.y + dy * MOVE_SPEED * dt
         
-        -- Tile collision check (check target tile)
+        -- Tile collision check
         local newTX = math.floor(newX / TILE_SIZE) + 1
         local newTY = math.floor(newY / TILE_SIZE) + 1
         local curTX = math.floor(self.x / TILE_SIZE) + 1
@@ -230,7 +323,7 @@ function Player:update(dt, input, tilemap)
         self.walkTimer = 0
     end
     
-    -- Tool cycling
+    -- ── Tool cycling (keyboard/gamepad only) ──────────────────────────────
     if input.toolNext then
         self.selectedTool = (self.selectedTool % #Tools.LIST) + 1
     end
@@ -301,9 +394,11 @@ function Player:tryAction(tilemap, particles)
     if action == "clear_weed" or action == "clear_log" or action == "clear_rock" then
         tilemap:setTileState(tx, ty, "cleared")
         if particles then particles:emit("chop", (tx - 1) * TILE_SIZE + 8, (ty - 1) * TILE_SIZE + 8) end
+        AudioManager.playSfx("till")
     elseif action == "till" then
         tilemap:setTileState(tx, ty, "tilled")
         if particles then particles:emit("dirt", (tx - 1) * TILE_SIZE + 8, (ty - 1) * TILE_SIZE + 8) end
+        AudioManager.playSfx("till")
     elseif action == "plant" then
         tilemap:setTileState(tx, ty, "seeded", self.selectedSeedType)
         self.seeds[self.selectedSeedType] = self.seeds[self.selectedSeedType] - 1
@@ -311,6 +406,7 @@ function Player:tryAction(tilemap, particles)
         tilemap:waterTile(tx, ty)
         self.wateringCanCharges = self.wateringCanCharges - 1
         if particles then particles:emit("water", (tx - 1) * TILE_SIZE + 8, (ty - 1) * TILE_SIZE + 8) end
+        AudioManager.playSfx("water")
     elseif action == "harvest" then
         local cropType = tile.cropType
         if cropType then
@@ -318,10 +414,86 @@ function Player:tryAction(tilemap, particles)
             self.harvestCounts[cropType] = (self.harvestCounts[cropType] or 0) + 1
             tilemap:setTileState(tx, ty, "cleared")
             if particles then particles:emit("harvest", (tx - 1) * TILE_SIZE + 8, (ty - 1) * TILE_SIZE + 8) end
+            AudioManager.playSfx("harvest")
         end
     end
     
     return action
+end
+
+--- Execute a pre-resolved action (called when player arrives via pathfinding).
+-- @param pa         table   pendingAction table from ActionRouter
+-- @param tilemap    Tilemap
+-- @param particles  Particles|nil
+function Player:_executeResolvedAction(pa, tilemap, particles)
+    local action = pa.action
+    local tx, ty = pa.targetTX, pa.targetTY
+
+    -- Special object interactions
+    if action == "sleep" then
+        -- Signal to main.lua via a queued result
+        self._queuedResult = "sleep"
+        return
+    end
+    if action == "open_shop" then
+        self._queuedResult = "open_shop"
+        return
+    end
+    if action == "sell" then
+        self:_doSell()
+        return
+    end
+    if action == "refill" then
+        self:_doRefill()
+        return
+    end
+
+    -- Tile-based actions
+    local tile = tilemap:getTile(tx, ty)
+    if not tile then return end
+
+    local cost = Tools.getEnergyCost(action)
+    if self.energy < cost then return end
+
+    if action == "water" and self.wateringCanCharges <= 0 then return end
+
+    local seedType = pa.seedType or self.selectedSeedType
+    if action == "plant" and (not self.seeds[seedType] or self.seeds[seedType] <= 0) then return end
+
+    -- Equip tool, deduct energy & play animation lock
+    if pa.toolIndex then
+        self.selectedTool = pa.toolIndex
+    end
+    self.energy = self.energy - cost
+    self.isActing = true
+    self.actionTimer = self.ACTION_DURATION
+
+    if action == "clear_weed" or action == "clear_log" or action == "clear_rock" then
+        tilemap:setTileState(tx, ty, "cleared")
+        if particles then particles:emit("chop", (tx-1)*TILE_SIZE+8, (ty-1)*TILE_SIZE+8) end
+        AudioManager.playSfx("till")
+    elseif action == "till" then
+        tilemap:setTileState(tx, ty, "tilled")
+        if particles then particles:emit("dirt", (tx-1)*TILE_SIZE+8, (ty-1)*TILE_SIZE+8) end
+        AudioManager.playSfx("till")
+    elseif action == "plant" then
+        tilemap:setTileState(tx, ty, "seeded", seedType)
+        self.seeds[seedType] = self.seeds[seedType] - 1
+    elseif action == "water" then
+        tilemap:waterTile(tx, ty)
+        self.wateringCanCharges = self.wateringCanCharges - 1
+        if particles then particles:emit("water", (tx-1)*TILE_SIZE+8, (ty-1)*TILE_SIZE+8) end
+        AudioManager.playSfx("water")
+    elseif action == "harvest" then
+        local cropType = tile.cropType
+        if cropType then
+            self.crops[cropType] = (self.crops[cropType] or 0) + 1
+            self.harvestCounts[cropType] = (self.harvestCounts[cropType] or 0) + 1
+            tilemap:setTileState(tx, ty, "cleared")
+            if particles then particles:emit("harvest", (tx-1)*TILE_SIZE+8, (ty-1)*TILE_SIZE+8) end
+            AudioManager.playSfx("harvest")
+        end
+    end
 end
 
 function Player:_doSell()
@@ -397,9 +569,33 @@ function Player:cycleSeedType()
 end
 
 --- Queue the player for Y-sorted rendering.
+-- Also queues the tap-destination indicator if active.
 function Player:queueRender(renderQueue)
+    -- Tap indicator: pulsing green diamond at destination
+    if self.tapIndicator then
+        local ind = self.tapIndicator
+        local progress = 1 - (ind.timer / self.TAP_INDICATOR_DURATION)
+        local alpha = 0.9 - progress * 0.7
+        local scale = 0.5 + progress * 0.5
+        local wx = (ind.tx - 1) * TILE_SIZE + TILE_SIZE / 2
+        local wy = (ind.ty - 1) * TILE_SIZE + TILE_SIZE / 2
+        table.insert(renderQueue, {
+            y = wy - 100,  -- Always below everything
+            draw = function()
+                love.graphics.setColor(0.3, 1, 0.4, alpha)
+                love.graphics.push()
+                love.graphics.translate(wx, wy)
+                love.graphics.rotate(math.pi / 4)
+                local s = 5 * scale
+                love.graphics.rectangle("fill", -s, -s, s * 2, s * 2)
+                love.graphics.setColor(1, 1, 1, 1)
+                love.graphics.pop()
+            end
+        })
+    end
+
     if not self.spriteImage then return end
-    
+
     local frame = self.walkFrame
     if self.isActing then
         frame = 3  -- Action/swing frame

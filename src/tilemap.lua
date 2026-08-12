@@ -63,8 +63,10 @@ function Tilemap:init()
     self.dirtImage:setFilter("nearest", "nearest")
     self.cropsImage = love.graphics.newImage("assets/sprites/sprout_lands/crops.png")
     self.cropsImage:setFilter("nearest", "nearest")
-    self.objectsImage = love.graphics.newImage("assets/sprites/sprout_lands/tools.png")
-    self.objectsImage:setFilter("nearest", "nearest")
+    self.furnitureImage = love.graphics.newImage("assets/sprites/sprout_lands/furniture.png")
+    self.furnitureImage:setFilter("nearest", "nearest")
+    self.chestImage = love.graphics.newImage("assets/sprites/sprout_lands/chest.png")
+    self.chestImage:setFilter("nearest", "nearest")
     
     -- Create grass/dirt quads dynamically during draw using BITMASK_MAP
     self.BITMASK_MAP = {
@@ -132,14 +134,13 @@ function Tilemap:init()
         end
     end
     
-    -- Create object quads (Temporary tool mapping)
-    local objNames = { "cot", "shipping_bin", "well", "seed_box" }
-    for i, name in ipairs(objNames) do
-        self.objectQuads[name] = love.graphics.newQuad(
-            ((i - 1) % 6) * 16, math.floor((i-1)/6)*16, TILE_SIZE, TILE_SIZE,
-            self.objectsImage:getDimensions()
-        )
-    end
+    -- Create object quads from correct spritesheets
+    self.objectDefs = {
+        cot = { image = self.furnitureImage, quad = love.graphics.newQuad(0 * 16, 0 * 16, 16, 32, self.furnitureImage:getDimensions()), offsetY = -16 },
+        well = { image = self.furnitureImage, quad = love.graphics.newQuad(4 * 16, 0 * 16, 16, 32, self.furnitureImage:getDimensions()), offsetY = -16 },
+        shipping_bin = { image = self.chestImage, quad = love.graphics.newQuad(1 * 16, 1 * 16, 16, 16, self.chestImage:getDimensions()), offsetY = 0 },
+        seed_box = { image = self.furnitureImage, quad = love.graphics.newQuad(5 * 16, 2 * 16, 16, 32, self.furnitureImage:getDimensions()), offsetY = -16 }
+    }
     
     -- Load biomes (obstacles)
     self.biomesImage = love.graphics.newImage("assets/sprites/sprout_lands/biomes.png")
@@ -229,8 +230,15 @@ end
 -- @param ty number
 -- @return string|nil: object type
 function Tilemap:getObject(tx, ty)
-    if self.objects[ty] then
+    if self.objects[ty] and self.objects[ty][tx] then
         return self.objects[ty][tx]
+    end
+    -- Check if the tile below has a tall object
+    if self.objects[ty+1] and self.objects[ty+1][tx] then
+        local objBelow = self.objects[ty+1][tx]
+        if objBelow == "cot" or objBelow == "well" or objBelow == "seed_box" then
+            return objBelow
+        end
     end
     return nil
 end
@@ -394,11 +402,12 @@ function Tilemap:queueEntities(renderQueue)
             
             -- Queue objects
             local obj = self:getObject(tx, ty)
-            if obj and self.objectQuads[obj] then
+            local objDef = self.objectDefs[obj]
+            if objDef then
                 table.insert(renderQueue, {
                     y = py, -- Objects have height
                     draw = function()
-                        love.graphics.draw(self.objectsImage, self.objectQuads[obj], px, py)
+                        love.graphics.draw(objDef.image, objDef.quad, px, py + (objDef.offsetY or 0))
                     end
                 })
             end
