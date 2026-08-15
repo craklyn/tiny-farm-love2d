@@ -121,16 +121,15 @@ function Tilemap:init()
     -- Carrots: row 1, Tomato: row 3, Sunflower: row 4 in crops.png
     self.cropQuads = {}
     for _, cropName in ipairs(Crops.ORDER) do
-        self.cropQuads[cropName] = {}
-        local row = 0
-        if cropName == "carrot" then row = 1
-        elseif cropName == "tomato" then row = 3
-        elseif cropName == "sunflower" then row = 4 end
-        for stage = 0, 5 do
-            self.cropQuads[cropName][stage] = love.graphics.newQuad(
-                stage * TILE_SIZE, row * TILE_SIZE, TILE_SIZE, TILE_SIZE,
-                self.cropsImage:getDimensions()
-            )
+        local row = Crops.TYPES[cropName].spriteRow
+        if row then
+            self.cropQuads[cropName] = {}
+            for stage = 0, 5 do
+                self.cropQuads[cropName][stage] = love.graphics.newQuad(
+                    stage * TILE_SIZE, row * TILE_SIZE, TILE_SIZE, TILE_SIZE,
+                    self.cropsImage:getDimensions()
+                )
+            end
         end
     end
     
@@ -294,7 +293,7 @@ function Tilemap:waterTile(tx, ty)
 end
 
 --- Advance all crops by one day (called during sleep).
-function Tilemap:advanceDay()
+function Tilemap:advanceDay(weather)
     for ty = 1, self.HEIGHT do
         for tx = 1, self.WIDTH do
             local tile = self.tiles[ty][tx]
@@ -309,6 +308,10 @@ function Tilemap:advanceDay()
                 end
             end
             tile.wateredToday = false
+            
+            if weather == "rainy" and (tile.state == "tilled" or tile.state == "seeded" or tile.state == "growing") then
+                tile.wateredToday = true
+            end
         end
     end
 end
@@ -402,14 +405,28 @@ function Tilemap:queueEntities(renderQueue)
             
             -- Queue objects
             local obj = self:getObject(tx, ty)
-            local objDef = self.objectDefs[obj]
-            if objDef then
+            if obj == "egg" then
                 table.insert(renderQueue, {
-                    y = py, -- Objects have height
+                    y = py,
                     draw = function()
-                        love.graphics.draw(objDef.image, objDef.quad, px, py + (objDef.offsetY or 0))
+                        -- Shadow
+                        love.graphics.setColor(0, 0, 0, 0.4)
+                        love.graphics.ellipse("fill", px + 8, py + 12, 4, 2)
+                        -- Egg
+                        love.graphics.setColor(1, 1, 1, 1)
+                        love.graphics.ellipse("fill", px + 8, py + 10, 3, 4)
                     end
                 })
+            else
+                local objDef = self.objectDefs[obj]
+                if objDef then
+                    table.insert(renderQueue, {
+                        y = py, -- Objects have height
+                        draw = function()
+                            love.graphics.draw(objDef.image, objDef.quad, px, py + (objDef.offsetY or 0))
+                        end
+                    })
+                end
             end
         end
     end

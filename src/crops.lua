@@ -4,12 +4,12 @@ local Crops = {}
 
 -- Crop definitions: daysToGrow, sellPrice, seedPrice, stages, unlockRequirement
 Crops.TYPES = {
-    carrot = {
-        name = "Carrot",
+    wheat = {
+        name = "Wheat",
         daysToGrow = 3,
         sellPrice = 15,
         seedPrice = 5,
-        stages = 4,  -- 0=seed, 1=sprout, 2=leafy, 3=ready
+        stages = 5,  -- 0=seed, 1, 2, 3, 4=ready
         unlockRequirement = nil,  -- always available
         spriteRow = 0,
     },
@@ -18,23 +18,18 @@ Crops.TYPES = {
         daysToGrow = 5,
         sellPrice = 30,
         seedPrice = 10,
-        stages = 4,
-        unlockRequirement = { crop = "carrot", count = 1 },
+        stages = 5,
+        unlockRequirement = { crop = "wheat", count = 1 },
         spriteRow = 1,
     },
-    sunflower = {
-        name = "Sunflower",
-        daysToGrow = 7,
-        sellPrice = 50,
-        seedPrice = 20,
-        stages = 4,
-        unlockRequirement = { crop = "tomato", count = 1 },
-        spriteRow = 2,
+    egg = {
+        name = "Egg",
+        sellPrice = 10,
     },
 }
 
 -- Order for UI display / seed selection
-Crops.ORDER = { "carrot", "tomato", "sunflower" }
+Crops.ORDER = { "wheat", "tomato", "egg" }
 
 --- Check if a crop at the given growth stage is ready to harvest.
 -- @param cropType string: key in TYPES

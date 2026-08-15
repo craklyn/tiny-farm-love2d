@@ -12,6 +12,9 @@ local UIMenus      = require("src.ui_menus")
 local Tools        = require("src.tools")
 local Crops        = require("src.crops")
 local ActionRouter = require("src.action_router")
+local Entities = require("src.entities")
+local Chicken = require("src.chicken")
+local Pathfinding = require("src.pathfinding")
 
 local AudioManager = require("src.audio_manager")
 local TitleScreen  = require("src.title_screen")
@@ -40,6 +43,15 @@ function love.load()
     -- Player starts near the cot (tile 3,3)
     player = Player.new(3, 3)
     player:loadSprites()
+    
+    Entities.init()
+    local reachable = Pathfinding.getReachableTiles(tilemap, 3, 3)
+    if #reachable > 0 then
+        local rt = reachable[love.math.random(1, #reachable)]
+        Entities.add(Chicken.new(rt.x, rt.y))
+    else
+        Entities.add(Chicken.new(3, 4))
+    end
     
     camera = Camera.new(Tilemap.WIDTH, Tilemap.HEIGHT,
         love.graphics.getWidth(), love.graphics.getHeight())
@@ -79,6 +91,7 @@ function love.update(dt)
     end
     
     if uiMenus:isOpen() then
+        uiMenus:update(dt)
         -- Menu input handling
         local result = uiMenus:handleInput(input, player)
         if result == "quit" then
@@ -103,6 +116,8 @@ function love.update(dt)
     
     -- Player movement & path following
     player:update(dt, input, tilemap)
+    
+    Entities.update(dt, tilemap)
 
     -- === Check for queued results from pathfinding-triggered actions ===
     if player._queuedResult then
@@ -111,9 +126,10 @@ function love.update(dt)
         if result == "sleep" then
             dayCycle:setDayDisplay(player.day + 1)
             dayCycle:startSleep(function()
-                tilemap:advanceDay()
-                player:processShippingBin()
                 player:startNewDay()
+                tilemap:advanceDay(player.weather)
+                Entities.onNewDay(tilemap)
+                player:processShippingBin()
             end)
         elseif result == "open_shop" then
             uiMenus:open("shop", player)
@@ -129,9 +145,10 @@ function love.update(dt)
             dayCycle:setDayDisplay(player.day + 1)
             dayCycle:startSleep(function()
                 -- Overnight processing
-                tilemap:advanceDay()
-                player:processShippingBin()
                 player:startNewDay()
+                tilemap:advanceDay(player.weather)
+                Entities.onNewDay(tilemap)
+                player:processShippingBin()
             end)
         elseif action == "open_shop" then
             uiMenus:open("shop", player)
@@ -141,27 +158,6 @@ function love.update(dt)
         end
     end
 
-    -- === Swipe-chain: apply action to each new tile the finger enters ===
-    if input.swipeActive and input._swipeMoved then
-        local stx, sty = input.swipeTileX, input.swipeTileY
-        local ptx, pty = player:getTilePos()
-        local resolved = ActionRouter.resolve(tilemap, player, stx, sty, ptx, pty)
-        -- Only chain-able actions (no sleep/shop/sell during swipe)
-        local chainable = { water = true, plant = true, till = true, harvest = true,
-                            clear_weed = true, clear_log = true, clear_rock = true }
-        if resolved and chainable[resolved.action] then
-            -- Immediately face the target tile (no pathfinding during swipe)
-            local fdx = stx - ptx
-            local fdy = sty - pty
-            if math.abs(fdx) >= math.abs(fdy) then
-                player.facing = fdx > 0 and "right" or "left"
-            else
-                player.facing = fdy > 0 and "down" or "up"
-            end
-            player:_executeResolvedAction(resolved, tilemap, particles)
-            hud:checkMilestones(player)
-        end
-    end
 
     -- Seed type cycling when Seeds tool active (keyboard)
     local currentTool = Tools.LIST[player.selectedTool]
@@ -175,7 +171,7 @@ function love.update(dt)
     camera:update(dt, player.x, player.y)
 
     -- Update particles
-    particles:update(dt)
+    particles:update(dt, player, camera)
 end
 
 function love.draw()
@@ -194,9 +190,18 @@ function love.draw()
     local renderQueue = {}
     tilemap:queueEntities(renderQueue)
     player:queueRender(renderQueue)
+    Entities.queueRender(renderQueue)
     
-    -- Sort entities by Y coordinate
+    -- Assign insert order to guarantee stable sorting and prevent Z-fighting
+    for i, entity in ipairs(renderQueue) do
+        entity.insertOrder = i
+    end
+    
+    -- Sort entities by Y coordinate, falling back to insertOrder
     table.sort(renderQueue, function(a, b)
+        if a.y == b.y then
+            return a.insertOrder < b.insertOrder
+        end
         return a.y < b.y
     end)
     
@@ -205,7 +210,6 @@ function love.draw()
         entity.draw()
     end
     
-    -- Draw particles
     particles:draw()
     
     camera:release()

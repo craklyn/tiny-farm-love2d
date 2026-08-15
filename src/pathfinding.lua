@@ -158,4 +158,45 @@ function Pathfinding._reconstruct(cameFrom, startKey, goalKey, goalTX, goalTY)
     return path
 end
 
+--- Find all walkable tiles reachable from a starting position
+function Pathfinding.getReachableTiles(tilemap, startX, startY)
+    local reachable = {}
+    local queue = { {x = startX, y = startY} }
+    local visited = {}
+    
+    local function posToKey(x, y) return x .. "," .. y end
+    visited[posToKey(startX, startY)] = true
+    
+    local index = 1
+    while index <= #queue do
+        local curr = queue[index]
+        index = index + 1
+        
+        if tilemap:isWalkable(curr.x, curr.y) or (curr.x == startX and curr.y == startY) then
+            if tilemap:isWalkable(curr.x, curr.y) then
+                table.insert(reachable, {x = curr.x, y = curr.y})
+            end
+            
+            local neighbors = {
+                {x = curr.x - 1, y = curr.y},
+                {x = curr.x + 1, y = curr.y},
+                {x = curr.x, y = curr.y - 1},
+                {x = curr.x, y = curr.y + 1}
+            }
+            
+            for _, n in ipairs(neighbors) do
+                local nKey = posToKey(n.x, n.y)
+                if not visited[nKey] then
+                    visited[nKey] = true
+                    if tilemap:isWalkable(n.x, n.y) then
+                        table.insert(queue, {x = n.x, y = n.y})
+                    end
+                end
+            end
+        end
+    end
+    
+    return reachable
+end
+
 return Pathfinding
