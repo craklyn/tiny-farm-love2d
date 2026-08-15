@@ -34,43 +34,39 @@ function Player.new(startTX, startTY)
     self.maxEnergy = 20
     self.gold = 0
     self.day = 1
+    self.weather = "sunny"
     
     -- Inventory
     self.selectedTool = 1  -- index into Tools.LIST
-    self.selectedSeedType = "carrot"  -- which seed to plant when using Seeds tool
+    self.selectedSeedType = "wheat"  -- which seed to plant when using Seeds tool
     self.wateringCanCharges = 8
     self.maxWateringCanCharges = 8
     
     self.seeds = {
-        carrot = 5,
-        tomato = 0,
-        sunflower = 0,
+        wheat = 5,
+        tomato = 0
     }
     
     self.crops = {
-        carrot = 0,
-        tomato = 0,
-        sunflower = 0,
+        wheat = 0,
+        tomato = 0
     }
     
     self.harvestCounts = {
-        carrot = 0,
-        tomato = 0,
-        sunflower = 0,
+        wheat = 0,
+        tomato = 0
     }
     
     -- Shipping bin contents
     self.shippingBin = {
-        carrot = 0,
-        tomato = 0,
-        sunflower = 0,
+        wheat = 0,
+        tomato = 0
     }
     
     -- Click-to-move (legacy pixel target, now replaced by path queue)
     self.moveTargetX = nil
     self.moveTargetY = nil
 
-    -- A* path queue: list of {tx, ty} waypoints
     self.path = {}
     -- Action to execute automatically on arrival at path destination
     -- { toolIndex, action, targetTX, targetTY, seedType }
@@ -79,6 +75,8 @@ function Player.new(startTX, startTY)
     -- Tap-destination visual: { tx, ty, timer }
     self.tapIndicator = nil
     self.TAP_INDICATOR_DURATION = 0.6
+    
+    self.dragToolIndex = -1
 
     -- Spritesheet
     self.spriteImage = nil
@@ -149,64 +147,90 @@ function Player:update(dt, input, tilemap)
     local dx, dy = 0, 0
 
     -- ── Touch/mouse tap → pathfind ────────────────────────────────────────
-    if input.mode == "mouse" and input.mouseClicked then
-        local ctx, cty = input.clickTileX, input.clickTileY
-        if ctx and cty then
-            local ptx, pty = self:getTilePos()
+    local targetTX, targetTY = nil, nil
+    local isDrag = false
+    local isNewTap = false
 
-            -- Resolve what action this tap should produce
-            local resolved = ActionRouter.resolve(tilemap, self, ctx, cty, ptx, pty)
+    if input.mode == "mouse" then
+        if input.mouseClicked and input.clickTileX and input.clickTileY then
+            targetTX, targetTY = input.clickTileX, input.clickTileY
+            isNewTap = true
+        elseif input.swipeActive and input._swipeMoved and input.swipeTileX and input.swipeTileY then
+            targetTX, targetTY = input.swipeTileX, input.swipeTileY
+            isDrag = true
+        end
+    end
 
-            -- Determine actual walk destination
-            local goalTX, goalTY = ctx, cty
+    if targetTX and targetTY then
+        local ptx, pty = self:getTilePos()
+        
+        if isNewTap then
+            self.path = {}
+            self.pendingAction = nil
+            self.tapIndicator = nil
+        end
+        
+        local dragIntent = isDrag and self.dragToolIndex or nil
+        local resolved = ActionRouter.resolve(tilemap, self, targetTX, targetTY, ptx, pty, isDrag, dragIntent)
 
-            -- Find path
-            local newPath = Pathfinding.findPath(tilemap, ptx, pty, goalTX, goalTY)
-            if newPath then
-                self.path = newPath
-                -- Store tap indicator
-                local finalStep = newPath[#newPath]
-                local indTX = finalStep and finalStep.tx or ctx
-                local indTY = finalStep and finalStep.ty or cty
-                self.tapIndicator = { tx = indTX, ty = indTY, timer = self.TAP_INDICATOR_DURATION }
+        if isNewTap then
+            if resolved then
+                self.dragToolIndex = resolved.toolIndex
+            else
+                self.dragToolIndex = -1
+            end
+        end
 
-                -- If there's an action on arrival, store it
-                if resolved then
-                    if #newPath == 0 then
-                        local dist = math.abs(ptx - ctx) + math.abs(pty - cty)
-                        if dist <= 1 then
-                            local pa = {
-                                toolIndex = resolved.toolIndex,
-                                action    = resolved.action,
-                                targetTX  = resolved.targetTX,
-                                targetTY  = resolved.targetTY,
-                                seedType  = resolved.seedType,
-                            }
-                            local faceDX = pa.targetTX - ptx
-                            local faceDY = pa.targetTY - pty
-                            if faceDX ~= 0 or faceDY ~= 0 then
-                                if math.abs(faceDX) >= math.abs(faceDY) then
-                                    self.facing = faceDX > 0 and "right" or "left"
-                                else
-                                    self.facing = faceDY > 0 and "down" or "up"
-                                end
-                            end
-                            self:_executeResolvedAction(pa, tilemap, nil)
-                        end
-                        self.pendingAction = nil
-                    else
-                        self.pendingAction = {
+        local goalTX, goalTY = targetTX, targetTY
+        local newPath = Pathfinding.findPath(tilemap, ptx, pty, goalTX, goalTY)
+        if newPath then
+            self.path = newPath
+            local finalStep = newPath[#newPath]
+            local indTX = finalStep and finalStep.tx or targetTX
+            local indTY = finalStep and finalStep.ty or targetTY
+            
+            local r, g, b = ActionRouter.getCursorColor(tilemap, self, targetTX, targetTY)
+            self.tapIndicator = { tx = indTX, ty = indTY, timer = self.TAP_INDICATOR_DURATION, r = r, g = g, b = b }
+
+            if resolved then
+                if #newPath == 0 then
+                    local dist = math.abs(ptx - targetTX) + math.abs(pty - targetTY)
+                    if dist <= 1 then
+                        local pa = {
                             toolIndex = resolved.toolIndex,
                             action    = resolved.action,
                             targetTX  = resolved.targetTX,
                             targetTY  = resolved.targetTY,
                             seedType  = resolved.seedType,
                         }
+                        local faceDX = pa.targetTX - ptx
+                        local faceDY = pa.targetTY - pty
+                        if faceDX ~= 0 or faceDY ~= 0 then
+                            if math.abs(faceDX) >= math.abs(faceDY) then
+                                self.facing = faceDX > 0 and "right" or "left"
+                            else
+                                self.facing = faceDY > 0 and "down" or "up"
+                            end
+                        end
+                        self:_executeResolvedAction(pa, tilemap, nil)
                     end
-                else
                     self.pendingAction = nil
+                else
+                    self.pendingAction = {
+                        toolIndex = resolved.toolIndex,
+                        action    = resolved.action,
+                        targetTX  = resolved.targetTX,
+                        targetTY  = resolved.targetTY,
+                        seedType  = resolved.seedType,
+                    }
                 end
+            else
+                self.pendingAction = nil
             end
+        else
+            self.path = {}
+            self.pendingAction = nil
+            self.tapIndicator = nil
         end
     end
 
@@ -332,6 +356,8 @@ function Player:update(dt, input, tilemap)
     end
 end
 
+
+
 --- Try to perform the current tool's action on the facing tile.
 -- @param tilemap Tilemap
 -- @param particles Particles: for visual effects
@@ -376,7 +402,7 @@ function Player:tryAction(tilemap, particles)
     if not action then return nil end
     
     local cost = Tools.getEnergyCost(action)
-    if self.energy < cost then return nil end
+    if self.energy <= 0 then return nil end
     
     -- Special checks
     if action == "water" and self.wateringCanCharges <= 0 then
@@ -387,7 +413,7 @@ function Player:tryAction(tilemap, particles)
     end
     
     -- Execute action
-    self.energy = self.energy - cost
+    self.energy = math.max(0, self.energy - cost)
     self.isActing = true
     self.actionTimer = self.ACTION_DURATION
     
@@ -435,6 +461,14 @@ function Player:_executeResolvedAction(pa, tilemap, particles)
         self._queuedResult = "sleep"
         return
     end
+    if action == "collect" then
+        if tilemap.objects[ty] and tilemap.objects[ty][tx] == "egg" then
+            tilemap.objects[ty][tx] = nil
+            self.crops["egg"] = (self.crops["egg"] or 0) + 1
+            AudioManager.playSfx("harvest")
+        end
+        return
+    end
     if action == "open_shop" then
         self._queuedResult = "open_shop"
         return
@@ -453,7 +487,7 @@ function Player:_executeResolvedAction(pa, tilemap, particles)
     if not tile then return end
 
     local cost = Tools.getEnergyCost(action)
-    if self.energy < cost then return end
+    if self.energy <= 0 then return end
 
     if action == "water" and self.wateringCanCharges <= 0 then return end
 
@@ -464,7 +498,7 @@ function Player:_executeResolvedAction(pa, tilemap, particles)
     if pa.toolIndex then
         self.selectedTool = pa.toolIndex
     end
-    self.energy = self.energy - cost
+    self.energy = math.max(0, self.energy - cost)
     self.isActing = true
     self.actionTimer = self.ACTION_DURATION
 
@@ -497,15 +531,27 @@ function Player:_executeResolvedAction(pa, tilemap, particles)
 end
 
 function Player:_doSell()
+    local AudioManager = require("src.audio_manager")
     local soldAnything = false
+    local totalEarned = 0
     for cropType, count in pairs(self.crops) do
         if count > 0 then
-            self.shippingBin[cropType] = (self.shippingBin[cropType] or 0) + count
+            local def = Crops.TYPES[cropType]
+            if def then
+                totalEarned = totalEarned + count * (def.sellPrice or 5)
+                self.harvestCounts[cropType] = (self.harvestCounts[cropType] or 0) + count
+            end
             self.crops[cropType] = 0
             soldAnything = true
         end
     end
-    return soldAnything and "sell" or nil
+    
+    if soldAnything then
+        self.gold = self.gold + totalEarned
+        AudioManager.playSfx("harvest")
+        return "sell"
+    end
+    return nil
 end
 
 function Player:_doRefill()
@@ -532,6 +578,11 @@ function Player:startNewDay()
     self.energy = self.maxEnergy
     self.wateringCanCharges = self.maxWateringCanCharges
     self.day = self.day + 1
+    if math.random() < 0.2 then
+        self.weather = "rainy"
+    else
+        self.weather = "sunny"
+    end
 end
 
 --- Buy a seed from the shop.
@@ -561,9 +612,13 @@ function Player:cycleSeedType()
     for offset = 1, #Crops.ORDER do
         local idx = ((currentIdx - 1 + offset) % #Crops.ORDER) + 1
         local seedType = Crops.ORDER[idx]
-        if Crops.isSeedUnlocked(seedType, self.harvestCounts) and self.seeds[seedType] > 0 then
-            self.selectedSeedType = seedType
-            return
+        local def = Crops.TYPES[seedType]
+        -- Only cycle to crops that are plantable seeds
+        if def and def.seedPrice then
+            if Crops.isSeedUnlocked(seedType, self.harvestCounts) and (self.seeds[seedType] or 0) > 0 then
+                self.selectedSeedType = seedType
+                return
+            end
         end
     end
 end
@@ -582,7 +637,7 @@ function Player:queueRender(renderQueue)
         table.insert(renderQueue, {
             y = wy - 100,  -- Always below everything
             draw = function()
-                love.graphics.setColor(0.3, 1, 0.4, alpha)
+                love.graphics.setColor(ind.r or 0.3, ind.g or 1, ind.b or 0.4, alpha)
                 love.graphics.push()
                 love.graphics.translate(wx, wy)
                 love.graphics.rotate(math.pi / 4)

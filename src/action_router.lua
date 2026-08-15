@@ -22,6 +22,7 @@ local SPECIAL_OBJECTS = {
     well         = "refill",
     seed_box     = "open_shop",
     shipping_bin = "sell",
+    egg          = "collect",
 }
 
 -- Tool index lookup by name for auto-selection
@@ -40,6 +41,8 @@ end
 -- @param tapTY     number   — tapped tile row (1-indexed)
 -- @param playerTX  number   — player's current tile column
 -- @param playerTY  number   — player's current tile row
+-- @param isDrag    bool     — true if this action was triggered by a drag/swipe
+-- @param dragToolIndex number|nil — if provided, restricts the action to only use this tool
 --
 -- @return table|nil with fields:
 --   .action      string   — action name (matches Tools.ENERGY_COSTS keys, or special)
@@ -48,18 +51,30 @@ end
 --   .targetTY    number
 --   .walkTo      bool     — true if player must walk to an adjacent tile first
 --   .seedType    string|nil — seed type if action == "plant"
-function ActionRouter.resolve(tilemap, player, tapTX, tapTY, playerTX, playerTY)
+function ActionRouter.resolve(tilemap, player, tapTX, tapTY, playerTX, playerTY, isDrag, dragToolIndex)
+    local dist = 0
+    if playerTX and playerTY then
+        dist = math.abs(playerTX - tapTX) + math.abs(playerTY - tapTY)
+    end
+
+    local function checkResult(result)
+        if result and dragToolIndex and dragToolIndex ~= result.toolIndex then
+            return nil
+        end
+        return result
+    end
+
     -- ── 1. Check for a special object on the tapped tile ──────────────────
     local obj = tilemap:getObject(tapTX, tapTY)
     if obj and SPECIAL_OBJECTS[obj] then
-        return {
+        return checkResult({
             action    = SPECIAL_OBJECTS[obj],
             toolIndex = 1,
             targetTX  = tapTX,
             targetTY  = tapTY,
             walkTo    = true,
             seedType  = nil,
-        }
+        })
     end
 
     -- ── 2. Get tile state ──────────────────────────────────────────────────
@@ -68,64 +83,70 @@ function ActionRouter.resolve(tilemap, player, tapTX, tapTY, playerTX, playerTY)
 
     local state = tile.state
 
+    -- Intent Filter: For non-obstacles, if it's a far tap (not a drag), treat as pure movement
+    local isToolAction = (state == "cleared" or state == "tilled" or state == "seeded" or state == "growing")
+    if isToolAction and not isDrag and dist > 1 then
+        return nil
+    end
+
     -- ── 3. Obstacles → clear with correct tool ────────────────────────────
     if state == "obstacle_rock" then
-        return {
+        return checkResult({
             action    = "clear_rock",
             toolIndex = toolIndexByName("Pickaxe"),
             targetTX  = tapTX,
             targetTY  = tapTY,
             walkTo    = true,
             seedType  = nil,
-        }
+        })
     end
 
     if state == "obstacle_log" then
-        return {
+        return checkResult({
             action    = "clear_log",
             toolIndex = toolIndexByName("Axe"),
             targetTX  = tapTX,
             targetTY  = tapTY,
             walkTo    = true,
             seedType  = nil,
-        }
+        })
     end
 
     if state == "obstacle_weed" then
-        return {
+        return checkResult({
             action    = "clear_weed",
             toolIndex = toolIndexByName("Hands"),
             targetTX  = tapTX,
             targetTY  = tapTY,
             walkTo    = true,
             seedType  = nil,
-        }
+        })
     end
 
     -- ── 4. Ready crop → harvest ───────────────────────────────────────────
     if state == "ready" then
-        return {
+        return checkResult({
             action    = "harvest",
             toolIndex = toolIndexByName("Hands"),
             targetTX  = tapTX,
             targetTY  = tapTY,
             walkTo    = true,
             seedType  = nil,
-        }
+        })
     end
 
     -- ── 5. Tilled soil → plant active seed (if player has seeds) ──────────
     if state == "tilled" then
         local seedType = player.selectedSeedType
         if player.seeds[seedType] and player.seeds[seedType] > 0 then
-            return {
+            return checkResult({
                 action    = "plant",
                 toolIndex = toolIndexByName("Seeds"),
                 targetTX  = tapTX,
                 targetTY  = tapTY,
                 walkTo    = true,
                 seedType  = seedType,
-            }
+            })
         end
         -- No seeds of active type — still walkable, just nothing to do
         return nil
@@ -133,30 +154,30 @@ function ActionRouter.resolve(tilemap, player, tapTX, tapTY, playerTX, playerTY)
 
     -- ── 6. Cleared soil → till ────────────────────────────────────────────
     if state == "cleared" then
-        if player.energy >= Tools.getEnergyCost("till") then
-            return {
+        if player.energy > 0 then
+            return checkResult({
                 action    = "till",
                 toolIndex = toolIndexByName("Hoe"),
                 targetTX  = tapTX,
                 targetTY  = tapTY,
                 walkTo    = true,
                 seedType  = nil,
-            }
+            })
         end
         return nil
     end
 
     -- ── 7. Seeded / Growing and not yet watered today → water ─────────────
     if (state == "seeded" or state == "growing") and not tile.wateredToday then
-        if player.wateringCanCharges > 0 and player.energy >= Tools.getEnergyCost("water") then
-            return {
+        if player.wateringCanCharges > 0 and player.energy > 0 then
+            return checkResult({
                 action    = "water",
                 toolIndex = toolIndexByName("Watering Can"),
                 targetTX  = tapTX,
                 targetTY  = tapTY,
                 walkTo    = true,
                 seedType  = nil,
-            }
+            })
         end
         return nil
     end

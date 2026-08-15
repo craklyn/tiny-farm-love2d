@@ -11,6 +11,11 @@ function UIMenus.new()
     self.activeMenu = nil   -- nil, "pause", "shop", "inventory"
     self.selectedOption = 1
     self.shopItems = {}
+    self.scale = 1.0
+    self.transitionTimer = 0
+    
+    self.cropsImage = love.graphics.newImage("assets/sprites/sprout_lands/crops.png")
+    self.cropsImage:setFilter("nearest", "nearest")
     return self
 end
 
@@ -20,6 +25,8 @@ end
 function UIMenus:open(menuName, player)
     self.activeMenu = menuName
     self.selectedOption = 1
+    self.scale = 0.8
+    self.transitionTimer = 0
     
     if menuName == "shop" and player then
         self:_buildShopItems(player)
@@ -36,6 +43,27 @@ end
 -- @return boolean
 function UIMenus:isOpen()
     return self.activeMenu ~= nil
+end
+
+function UIMenus:update(dt)
+    if not self.activeMenu then return end
+    
+    if self.transitionTimer < 0.2 then
+        self.transitionTimer = math.min(0.2, self.transitionTimer + dt)
+        local t = self.transitionTimer / 0.2
+        -- Simple ease out back / spring
+        local s = 1.70158
+        self.scale = 0.8 + (1.0 - 0.8) * ((t - 1) * (t - 1) * ((s + 1) * (t - 1) + s) + 1)
+    else
+        self.scale = 1.0
+    end
+    
+    -- Update item flash timers
+    for _, item in ipairs(self.shopItems) do
+        if item.flashTimer and item.flashTimer > 0 then
+            item.flashTimer = item.flashTimer - dt
+        end
+    end
 end
 
 --- Handle input for the active menu.
@@ -113,12 +141,17 @@ function UIMenus:onMouseClick(x, y, player)
     local startY = menuY + 40  -- After title
     
     local maxOptions = self:_getOptionCount()
+    local cy = startY
     for i = 1, maxOptions do
-        local oy = startY + (i - 1) * optionH
-        if x >= menuX and x <= menuX + menuW and y >= oy and y <= oy + optionH then
+        local currentH = optionH
+        if self.activeMenu == "shop" then
+            currentH = 52
+        end
+        if x >= menuX and x <= menuX + menuW and y >= cy and y <= cy + currentH then
             self.selectedOption = i
             return self:_selectOption(player)
         end
+        cy = cy + currentH
     end
     
     return nil
@@ -138,6 +171,9 @@ end
 function UIMenus:_getMenuHeight()
     local font = love.graphics.getFont()
     local fh = font:getHeight()
+    if self.activeMenu == "shop" then
+        return 50 + self:_getOptionCount() * 52 + 20
+    end
     local optionH = fh + 12
     return 50 + self:_getOptionCount() * optionH + 20
 end
@@ -154,7 +190,10 @@ function UIMenus:_selectOption(player)
         if self.selectedOption <= #self.shopItems then
             local item = self.shopItems[self.selectedOption]
             if player:buySeed(item.seedType) then
+                local AudioManager = require("src.audio_manager")
+                AudioManager.playSfx("harvest")
                 self:_buildShopItems(player)  -- Refresh
+                self.shopItems[self.selectedOption].flashTimer = 0.2
                 return "bought_seed"
             end
         else
@@ -172,15 +211,21 @@ function UIMenus:_buildShopItems(player)
     self.shopItems = {}
     for _, cropName in ipairs(Crops.ORDER) do
         local def = Crops.TYPES[cropName]
-        local unlocked = Crops.isSeedUnlocked(cropName, player.harvestCounts)
-        local affordable = player.gold >= def.seedPrice
-        table.insert(self.shopItems, {
-            seedType = cropName,
-            name = def.name .. " Seeds",
-            price = def.seedPrice,
-            unlocked = unlocked,
-            affordable = affordable and unlocked,
-        })
+        if def.seedPrice then
+            local unlocked = Crops.isSeedUnlocked(cropName, player.harvestCounts)
+            local affordable = player.gold >= def.seedPrice
+            table.insert(self.shopItems, {
+                seedType = cropName,
+                name = def.name,
+                price = def.seedPrice,
+                unlocked = unlocked,
+                affordable = affordable and unlocked,
+                spriteRow = def.spriteRow,
+                stages = def.stages,
+                owned = player.seeds[cropName] or 0,
+                flashTimer = 0,
+            })
+        end
     end
 end
 
@@ -195,7 +240,7 @@ function UIMenus:draw(player)
     local fh = font:getHeight()
     
     -- Dim background
-    love.graphics.setColor(0, 0, 0, 0.5)
+    love.graphics.setColor(0, 0, 0, 0.5 * self.scale)
     love.graphics.rectangle("fill", 0, 0, sw, sh)
     
     -- Menu panel
@@ -203,6 +248,11 @@ function UIMenus:draw(player)
     local menuH = self:_getMenuHeight()
     local menuX = sw / 2 - menuW / 2
     local menuY = sh / 2 - menuH / 2
+    
+    love.graphics.push()
+    love.graphics.translate(sw / 2, sh / 2)
+    love.graphics.scale(self.scale, self.scale)
+    love.graphics.translate(-sw / 2, -sh / 2)
     
     -- Panel background
     love.graphics.setColor(0.12, 0.12, 0.18, 0.95)
@@ -221,7 +271,12 @@ function UIMenus:draw(player)
     
     local tw = font:getWidth(title)
     love.graphics.setColor(1, 0.95, 0.7, 1)
-    love.graphics.print(title, sw / 2 - tw / 2, menuY + 12)
+    
+    if self.activeMenu == "shop" then
+        love.graphics.print(title, menuX + 15, menuY + 12)
+    else
+        love.graphics.print(title, menuX + menuW / 2 - tw / 2, menuY + 12)
+    end
     
     local optionH = fh + 12
     local startY = menuY + 40
@@ -231,22 +286,18 @@ function UIMenus:draw(player)
         self:_drawOption("Quit", 2, menuX, startY + optionH, menuW, optionH, true)
         
     elseif self.activeMenu == "shop" then
-        -- Gold display
+        local goldText = string.format("%dg", player.gold)
         love.graphics.setColor(1, 0.85, 0.2, 1)
-        local goldText = string.format("Gold: %dg", player.gold)
         love.graphics.print(goldText, menuX + menuW - font:getWidth(goldText) - 15, menuY + 12)
+        love.graphics.setColor(1, 1, 1, 1)
         
+        local cy = startY
         for i, item in ipairs(self.shopItems) do
-            local label
-            if not item.unlocked then
-                label = "??? (locked)"
-            else
-                label = string.format("%s - %dg", item.name, item.price)
-            end
-            self:_drawOption(label, i, menuX, startY + (i - 1) * optionH, menuW, optionH, item.affordable)
+            self:_drawShopItem(item, i, menuX, cy, menuW, 52, player)
+            cy = cy + 52
         end
         local closeIdx = #self.shopItems + 1
-        self:_drawOption("Close", closeIdx, menuX, startY + (#self.shopItems) * optionH, menuW, optionH, true)
+        self:_drawOption("Close", closeIdx, menuX, cy, menuW, 52, true)
         
     elseif self.activeMenu == "inventory" then
         -- Show seeds and crops
@@ -274,17 +325,7 @@ function UIMenus:draw(player)
             y = y + fh + 2
         end
         
-        y = y + 8
-        love.graphics.setColor(0.6, 0.6, 0.7, 1)
-        love.graphics.print("Shipping Bin:", menuX + 15, y)
-        y = y + fh + 4
-        for _, cropName in ipairs(Crops.ORDER) do
-            local def = Crops.TYPES[cropName]
-            local count = player.shippingBin[cropName] or 0
-            love.graphics.setColor(0.8, 0.8, 0.75, 1)
-            love.graphics.print(string.format("  %s: %d", def.name, count), menuX + 15, y)
-            y = y + fh + 2
-        end
+        -- Shipping bin removed (instant selling)
         
         -- Adjust menu height for inventory
         -- Close button at bottom
@@ -292,17 +333,20 @@ function UIMenus:draw(player)
         self:_drawOption("Close", 1, menuX, y, menuW, optionH, true)
     end
     
+    love.graphics.pop()
     love.graphics.setColor(1, 1, 1, 1)
 end
 
 function UIMenus:_drawOption(text, index, menuX, y, menuW, optionH, enabled)
     local isSelected = (index == self.selectedOption)
     
-    -- Highlight background
+    -- Draw background
     if isSelected then
-        love.graphics.setColor(0.3, 0.3, 0.45, 0.6)
-        love.graphics.rectangle("fill", menuX + 8, y, menuW - 16, optionH, 4, 4)
+        love.graphics.setColor(0.3, 0.3, 0.45, 0.8)
+    else
+        love.graphics.setColor(0.18, 0.18, 0.25, 0.6)
     end
+    love.graphics.rectangle("fill", menuX + 8, y + 2, menuW - 16, optionH - 4, 6, 6)
     
     -- Text
     if not enabled then
@@ -314,7 +358,75 @@ function UIMenus:_drawOption(text, index, menuX, y, menuW, optionH, enabled)
     end
     
     local prefix = isSelected and "> " or "  "
-    love.graphics.print(prefix .. text, menuX + 15, y + 4)
+    local font = love.graphics.getFont()
+    local textY = y + (optionH - font:getHeight()) / 2
+    love.graphics.print(prefix .. text, menuX + 15, textY)
+end
+
+function UIMenus:_drawShopItem(item, index, menuX, y, menuW, optionH, player)
+    local isSelected = (index == self.selectedOption)
+    
+    -- Background
+    if isSelected then
+        love.graphics.setColor(0.3, 0.3, 0.45, 0.8)
+    else
+        love.graphics.setColor(0.18, 0.18, 0.25, 0.6)
+    end
+    
+    -- Flash effect on purchase
+    if item.flashTimer > 0 then
+        love.graphics.setColor(1, 1, 1, item.flashTimer / 0.2)
+    end
+    
+    love.graphics.rectangle("fill", menuX + 8, y + 2, menuW - 16, optionH - 4, 6, 6)
+    
+    -- Gray out if locked or unaffordable
+    if not item.unlocked then
+        love.graphics.setColor(0.3, 0.3, 0.3, 0.8)
+    elseif not item.affordable then
+        love.graphics.setColor(0.5, 0.5, 0.5, 0.8)
+    else
+        love.graphics.setColor(1, 1, 1, 1)
+    end
+    
+    -- Draw crop sprite (stage 4 = fully grown)
+    local drawX = menuX + 16
+    local drawY = y + optionH / 2 - 8  -- 16px sprite centered
+    if self.cropsImage and item.unlocked then
+        local TILE_SIZE = 16
+        
+        local cropRow = item.spriteRow
+        
+        local stageIdx = 5 -- The 6th sprite is always the harvested item
+        local quad = love.graphics.newQuad(stageIdx * TILE_SIZE, cropRow * TILE_SIZE, TILE_SIZE, TILE_SIZE, self.cropsImage:getDimensions())
+        love.graphics.draw(self.cropsImage, quad, drawX, drawY, 0, 1.5, 1.5)
+    else
+        -- Placeholder if locked
+        love.graphics.print("?", drawX + 4, drawY)
+    end
+    
+    -- Text
+    if not item.unlocked then
+        love.graphics.setColor(0.4, 0.4, 0.4, 1)
+        love.graphics.print("??? (Locked)", drawX + 32, y + 10)
+    else
+        if isSelected then love.graphics.setColor(1, 1, 0.8, 1) else love.graphics.setColor(0.9, 0.9, 0.85, 1) end
+        love.graphics.print(item.name, drawX + 32, y + 6)
+        
+        -- Price
+        if item.affordable then
+            love.graphics.setColor(1, 0.85, 0.2, 1)
+        else
+            love.graphics.setColor(0.9, 0.3, 0.3, 1)
+        end
+        love.graphics.print(item.price .. "g", drawX + 32, y + 24)
+        
+        -- Owned
+        love.graphics.setColor(0.6, 0.7, 0.6, 1)
+        local font = love.graphics.getFont()
+        local ownedText = "Owned: " .. item.owned
+        love.graphics.print(ownedText, menuX + menuW - font:getWidth(ownedText) - 16, y + optionH / 2 - font:getHeight() / 2)
+    end
 end
 
 return UIMenus
