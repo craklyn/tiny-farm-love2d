@@ -37,49 +37,42 @@ local ActionRouter = require("src.action_router")
 local function testCropDefs()
     print("\n--- CropDefs Tests ---")
     
-    _assert(Crops.TYPES["carrot"] ~= nil, "Carrot type exists")
+    _assert(Crops.TYPES["wheat"] ~= nil, "Wheat type exists")
     _assert(Crops.TYPES["tomato"] ~= nil, "Tomato type exists")
-    _assert(Crops.TYPES["sunflower"] ~= nil, "Sunflower type exists")
     
-    local carrot = Crops.TYPES["carrot"]
-    _assert(carrot.daysToGrow == 3, "Carrot grows in 3 days")
-    _assert(carrot.sellPrice == 15, "Carrot sells for 15g")
-    _assert(carrot.seedPrice == 5, "Carrot seeds cost 5g")
+    local wheat = Crops.TYPES["wheat"]
+    _assert(wheat.daysToGrow == 3, "Wheat grows in 3 days")
+    _assert(wheat.sellPrice == 15, "Wheat sells for 15g")
+    _assert(wheat.seedPrice == 5, "Wheat seeds cost 5g")
     
     local tomato = Crops.TYPES["tomato"]
     _assert(tomato.daysToGrow == 5, "Tomato grows in 5 days")
     _assert(tomato.sellPrice == 30, "Tomato sells for 30g")
     
-    local sunflower = Crops.TYPES["sunflower"]
-    _assert(sunflower.daysToGrow == 7, "Sunflower grows in 7 days")
-    _assert(sunflower.sellPrice == 50, "Sunflower sells for 50g")
     
-    _assert(#Crops.ORDER == 3, "ORDER has 3 crops")
-    _assert(Crops.ORDER[1] == "carrot", "ORDER[1] is carrot")
+    _assert(#Crops.ORDER == 2, "ORDER has 2 crops")
+    _assert(Crops.ORDER[1] == "wheat", "ORDER[1] is wheat")
     
-    _assert(not Crops.isReady("carrot", 0), "Carrot not ready at stage 0")
-    _assert(not Crops.isReady("carrot", 2), "Carrot not ready at stage 2")
-    _assert(Crops.isReady("carrot", 3), "Carrot ready at stage 3")
-    _assert(Crops.isReady("carrot", 5), "Carrot ready at stage 5 (over)")
+    _assert(not Crops.isReady("wheat", 0), "Wheat not ready at stage 0")
+    _assert(not Crops.isReady("wheat", 2), "Wheat not ready at stage 2")
+    _assert(Crops.isReady("wheat", 3), "Wheat ready at stage 3")
+    _assert(Crops.isReady("wheat", 5), "Wheat ready at stage 5 (over)")
     _assert(not Crops.isReady("tomato", 4), "Tomato not ready at stage 4")
     _assert(Crops.isReady("tomato", 5), "Tomato ready at stage 5")
     
-    _assert(Crops.getVisualStage("carrot", 0) == 0, "Carrot visual stage 0 at growth 0")
-    _assert(Crops.getVisualStage("carrot", 1) == 1, "Carrot visual stage 1 at growth 1")
-    _assert(Crops.getVisualStage("carrot", 2) == 2, "Carrot visual stage 2 at growth 2")
-    _assert(Crops.getVisualStage("carrot", 3) == 3, "Carrot visual stage 3 at growth 3 (ready)")
+    _assert(Crops.getVisualStage("wheat", 0) == 0, "Wheat visual stage 0 at growth 0")
+    _assert(Crops.getVisualStage("wheat", 1) == 1, "Wheat visual stage 1 at growth 1")
+    _assert(Crops.getVisualStage("wheat", 2) == 2, "Wheat visual stage 2 at growth 2")
+    _assert(Crops.getVisualStage("wheat", 3) == 3, "Wheat visual stage 3 at growth 3 (ready)")
     
     local noHarvests = {}
-    _assert(Crops.isSeedUnlocked("carrot", noHarvests), "Carrot always unlocked")
+    _assert(Crops.isSeedUnlocked("wheat", noHarvests), "Wheat always unlocked")
     _assert(not Crops.isSeedUnlocked("tomato", noHarvests), "Tomato locked with no harvests")
-    _assert(not Crops.isSeedUnlocked("sunflower", noHarvests), "Sunflower locked with no harvests")
     
-    local oneCarrot = { carrot = 1 }
-    _assert(Crops.isSeedUnlocked("tomato", oneCarrot), "Tomato unlocked with 1 carrot")
-    _assert(not Crops.isSeedUnlocked("sunflower", oneCarrot), "Sunflower still locked")
+    local oneWheat = { wheat = 1 }
+    _assert(Crops.isSeedUnlocked("tomato", oneWheat), "Tomato unlocked with 1 wheat")
     
-    local bigHarvests = { carrot = 10, tomato = 2 }
-    _assert(Crops.isSeedUnlocked("sunflower", bigHarvests), "Sunflower unlocked with 2 tomatoes")
+    local bigHarvests = { wheat = 10, tomato = 2 }
 end
 
 local function testTools()
@@ -115,7 +108,7 @@ local function testPlayer()
     _assert(p.day == 1, "Initial day is 1")
     _assert(p.energy == 20, "Initial energy is 20")
     _assert(p.gold == 0, "Initial gold is 0")
-    _assert(p.seeds["carrot"] == 5, "Start with 5 carrot seeds")
+    _assert(p.seeds["wheat"] == 5, "Start with 5 wheat seeds")
     _assert(p.wateringCanCharges == 8, "Watering can starts at 8")
     
     -- Test set energy (simulated)
@@ -129,33 +122,30 @@ local function testPlayer()
     
     -- Test buySeed
     p.gold = 100
-    p.harvestCounts = { carrot = 0, tomato = 0, sunflower = 0 }
-    local bought = p:buySeed("carrot")
-    _assert(bought, "Can buy carrot seeds")
-    _assert(p.gold == 95, "Gold decreased by 5 (carrot seed price)")
-    _assert(p.seeds["carrot"] == 6, "Carrot seeds increased to 6")
+    local bought = p:buySeed("wheat")
+    _assert(bought, "Can buy wheat seeds")
+    _assert(p.gold == 95, "Gold decreased by 5 (wheat seed price)")
+    _assert(p.seeds["wheat"] == 6, "Wheat seeds increased to 6")
     
     local boughtTomato = p:buySeed("tomato")
     _assert(not boughtTomato, "Can't buy locked tomato seeds")
     
-    p.harvestCounts["carrot"] = 1
+    p.harvestCounts["wheat"] = 1
     boughtTomato = p:buySeed("tomato")
     _assert(boughtTomato, "Can buy tomato after unlock")
     _assert(p.gold == 85, "Gold decreased by 10 (tomato seed price)")
     
     -- Test sellCropsToBin (_doSell)
-    p.crops = { carrot = 3, tomato = 0, sunflower = 0 }
-    p.shippingBin = { carrot = 0, tomato = 0, sunflower = 0 }
     local sold = p:_doSell()
     _assert(sold, "Sold crops")
-    _assert(p.crops["carrot"] == 0, "Crops emptied after selling")
-    _assert(p.shippingBin["carrot"] == 3, "Bin has 3 carrots")
+    _assert(p.crops["wheat"] == 0, "Crops emptied after selling")
+    _assert(p.shippingBin["wheat"] == 3, "Bin has 3 wheats")
     
     -- Test processShippingBin
     p.gold = 0
     p:processShippingBin()
-    _assert(p.gold == 45, "Gold = 3 carrots x 15g = 45g")
-    _assert(p.shippingBin["carrot"] == 0, "Bin emptied after processing")
+    _assert(p.gold == 45, "Gold = 3 wheats x 15g = 45g")
+    _assert(p.shippingBin["wheat"] == 0, "Bin emptied after processing")
     
     -- Test startNewDay
     p.energy = 5
@@ -193,17 +183,17 @@ local function testFarm()
         end
     end
     
-    _assert(t.tiles[1][1].state == "border", "Corner is border")
+    _assert(t.tiles[1][1].state == "border", "Wheater is border")
     _assert(t.tiles[2][2].state == "cleared", "Interior is cleared")
     
     t.tiles[2][2].state = "tilled"
     _assert(t.tiles[2][2].state == "tilled", "Tile tilled")
     
     t.tiles[2][2].state = "seeded"
-    t.tiles[2][2].cropType = "carrot"
+    t.tiles[2][2].cropType = "wheat"
     t.tiles[2][2].growthStage = 0
     _assert(t.tiles[2][2].state == "seeded", "Tile seeded")
-    _assert(t.tiles[2][2].cropType == "carrot", "Crop type is carrot")
+    _assert(t.tiles[2][2].cropType == "wheat", "Crop type is wheat")
     
     t.tiles[2][2].wateredToday = true
     _assert(t.tiles[2][2].wateredToday, "Tile watered")
@@ -218,7 +208,7 @@ local function testFarm()
         t:advanceDay()
     end
     
-    _assert(t.tiles[2][2].state == "ready", "Carrot ready after 3 days")
+    _assert(t.tiles[2][2].state == "ready", "Wheat ready after 3 days")
     _assert(t.tiles[2][2].growthStage == 3, "Growth stage is 3")
     
     t.tiles[2][2].state = "cleared"
@@ -246,8 +236,8 @@ local function testIntegration()
     
     p.selectedTool = 6 -- Seeds
     _assert(Tools.getAction(6, "tilled") == "plant", "Seeds action on tilled = plant")
-    p.seeds["carrot"] = p.seeds["carrot"] - 1
-    _assert(p.seeds["carrot"] == 4, "4 carrot seeds remaining")
+    p.seeds["wheat"] = p.seeds["wheat"] - 1
+    _assert(p.seeds["wheat"] == 4, "4 wheat seeds remaining")
     
     p.selectedTool = 5 -- Watering Can
     _assert(Tools.getAction(5, "seeded") == "water", "WateringCan on seeded = water")
@@ -269,26 +259,26 @@ local function testIntegration()
         p:startNewDay()
     end
     
-    _assert(cropGrowth == 3, "Carrot fully grown after 3 watered days")
-    _assert(Crops.isReady("carrot", cropGrowth), "Carrot is ready to harvest")
+    _assert(cropGrowth == 3, "Wheat fully grown after 3 watered days")
+    _assert(Crops.isReady("wheat", cropGrowth), "Wheat is ready to harvest")
     _assert(p.day == 4, "Day 4")
     
     p.selectedTool = 1 -- Hands
     _assert(Tools.getAction(1, "ready") == "harvest", "Hands on ready = harvest")
     p.energy = p.energy - Tools.getEnergyCost("harvest")
-    p.crops["carrot"] = (p.crops["carrot"] or 0) + 1
-    p.harvestCounts["carrot"] = (p.harvestCounts["carrot"] or 0) + 1
-    _assert(p.crops["carrot"] == 1, "1 carrot in inventory")
+    p.crops["wheat"] = (p.crops["wheat"] or 0) + 1
+    p.harvestCounts["wheat"] = (p.harvestCounts["wheat"] or 0) + 1
+    _assert(p.crops["wheat"] == 1, "1 wheat in inventory")
     
-    _assert(Crops.isSeedUnlocked("tomato", p.harvestCounts), "Tomato unlocked after first carrot harvest")
+    _assert(Crops.isSeedUnlocked("tomato", p.harvestCounts), "Tomato unlocked after first wheat harvest")
     
     local sold = p:_doSell()
     _assert(sold, "Sold crops to bin")
-    _assert(p.crops["carrot"] == 0, "Carrots moved to bin")
+    _assert(p.crops["wheat"] == 0, "Wheats moved to bin")
     
     p:processShippingBin()
-    _assert(p.gold == 15, "Earned 15g from carrot")
-    _assert(p.shippingBin["carrot"] == 0, "Bin emptied")
+    _assert(p.gold == 15, "Earned 15g from wheat")
+    _assert(p.shippingBin["wheat"] == 0, "Bin emptied")
     
     local bought = p:buySeed("tomato")
     _assert(bought, "Bought tomato seeds")
@@ -345,8 +335,8 @@ local function testActionRouter()
 
     local p = Player.new(1, 1)
     p.selectedTool = 1
-    p.selectedSeedType = "carrot"
-    p.seeds = { carrot = 1 }
+    p.selectedSeedType = "wheat"
+    p.seeds = { wheat = 1 }
     p.energy = 20
     p.wateringCanCharges = 8
 

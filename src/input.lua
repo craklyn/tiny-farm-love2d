@@ -92,18 +92,11 @@ end
 --- Call from love.touchmoved
 function Input:onTouchMoved(id, x, y, camera)
     self.mode = "mouse"
-    local newTX, newTY
     if camera then
-        newTX, newTY = camera:screenToTile(x, y)
-    end
-    -- Only flag a swipe-move when the finger crosses into a new tile
-    if newTX and newTY and (newTX ~= self.swipeTileX or newTY ~= self.swipeTileY) then
-        self.swipeActive   = true
-        self.swipeTileX    = newTX
-        self.swipeTileY    = newTY
-        self._swipeScreenX = x
-        self._swipeScreenY = y
-        self._swipeMoved   = true
+        local newTX, newTY = camera:screenToTile(x, y)
+        if newTX and newTY and (newTX ~= self.swipeTileX or newTY ~= self.swipeTileY) then
+            self._pendingSwipeMove = { tx = newTX, ty = newTY, sx = x, sy = y }
+        end
     end
 end
 
@@ -113,6 +106,7 @@ function Input:onTouchReleased(id, x, y)
     self.swipeTileX    = nil
     self.swipeTileY    = nil
     self._touchReleased = true
+    self._pendingSwipeMove = nil
 end
 
 --- Update input state. Call once per frame at the start of love.update.
@@ -132,6 +126,16 @@ function Input:update(dt, camera)
     self.moveY = 0
     self._swipeMoved    = false
     self._touchReleased = false
+
+    if self._pendingSwipeMove then
+        self.swipeActive   = true
+        self.swipeTileX    = self._pendingSwipeMove.tx
+        self.swipeTileY    = self._pendingSwipeMove.ty
+        self._swipeScreenX = self._pendingSwipeMove.sx
+        self._swipeScreenY = self._pendingSwipeMove.sy
+        self._swipeMoved   = true
+        self._pendingSwipeMove = nil
+    end
     
     -- === Keyboard ===
     if love.keyboard.isDown("w") or love.keyboard.isDown("up") then

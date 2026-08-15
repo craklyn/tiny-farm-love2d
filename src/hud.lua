@@ -48,9 +48,9 @@ function HUD:checkMilestones(player)
         { id = "green_thumb",   condition = totalHarvests >= 10, msg = "🌿 Green Thumb!" },
         { id = "golden_field",  condition = player.gold >= 500, msg = "💰 Golden Field!" },
         { id = "master_farmer", condition = (
-            player.harvestCounts.carrot >= 1 and
+            player.harvestCounts.wheat >= 1 and
             player.harvestCounts.tomato >= 1 and
-            player.harvestCounts.sunflower >= 1
+            player.harvestCounts.wheat >= 1
         ), msg = "👨‍🌾 Master Farmer!" },
     }
     
@@ -99,6 +99,12 @@ function HUD:draw(player, tilemap, camera, input)
     -- Day counter (top-left)
     love.graphics.setColor(0.9, 0.9, 0.8, 1)
     love.graphics.print("Day " .. player.day, 10, 6)
+    
+    -- Weather
+    local wIcon = player.weather == "sunny" and "☀️" or "🌧️"
+    local weatherText = wIcon .. " " .. player.weather:gsub("^%l", string.upper)
+    love.graphics.setColor(0.6, 0.8, 1, 1)
+    love.graphics.print(weatherText, 80, 6)
     
     -- Energy (top-center)
     local energyText = string.format("Energy: %d/%d", player.energy, player.maxEnergy)
@@ -155,7 +161,7 @@ function HUD:draw(player, tilemap, camera, input)
     local seedX = sw / 2 - 80
     for i, cropName in ipairs(Crops.ORDER) do
         local count = player.seeds[cropName] or 0
-        local emoji = ({ carrot = "Ca", tomato = "To", sunflower = "Su" })[cropName]
+        local emoji = ({ wheat = "Wh", tomato = "To" })[cropName]
         local text = string.format("%s:%d", emoji, count)
         
         if Crops.isSeedUnlocked(cropName, player.harvestCounts) then
@@ -175,7 +181,7 @@ function HUD:draw(player, tilemap, camera, input)
     -- === Active Seed Pill (touch-first: always visible, tap to cycle) ===
     local seedName = player.selectedSeedType
     local seedCount = player.seeds[seedName] or 0
-    local seedEmoji = ({ carrot = "🥕", tomato = "🍅", sunflower = "🌻" })[seedName] or "?"
+    local seedEmoji = ({ wheat = "🌾", tomato = "🍅" })[seedName] or "?"
     local pillText = string.format("%s %s x%d", seedEmoji, seedName, seedCount)
     local pillW = font:getWidth(pillText) + 24
     local pillH = fh + 10

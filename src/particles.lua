@@ -8,6 +8,7 @@ function Particles.new()
     self.systems = {}     -- Active particle system instances
     self.templates = {}   -- Reusable particle system templates
     self.particleImage = nil
+    self.rainSystem = nil
     return self
 end
 
@@ -91,6 +92,17 @@ function Particles:init()
         ps:emit(10)
         return ps
     end
+
+    -- Rain (Global)
+    self.rainSystem = love.graphics.newParticleSystem(self.particleImage, 400)
+    self.rainSystem:setParticleLifetime(1.0, 1.0)
+    self.rainSystem:setEmissionRate(0)
+    self.rainSystem:setEmissionArea("uniform", 300, 1, 0, false)
+    self.rainSystem:setDirection(math.pi / 2) -- down
+    self.rainSystem:setSpeed(350, 450)
+    self.rainSystem:setLinearAcceleration(-30, 0, -30, 0)
+    self.rainSystem:setColors(0.5, 0.7, 1.0, 0.4, 0.5, 0.7, 1.0, 0.4)
+    self.rainSystem:setSizes(1, 1.5)
 end
 
 --- Emit a particle effect.
@@ -107,7 +119,7 @@ end
 
 --- Update all active particle systems.
 -- @param dt number
-function Particles:update(dt)
+function Particles:update(dt, player, camera)
     for i = #self.systems, 1, -1 do
         local ps = self.systems[i]
         ps:update(dt)
@@ -116,6 +128,16 @@ function Particles:update(dt)
             table.remove(self.systems, i)
         end
     end
+    
+    if player and player.weather == "rainy" then
+        self.rainSystem:setEmissionRate(200)
+        if camera then
+            self.rainSystem:setPosition(camera.x, camera.y - 120)
+        end
+    else
+        self.rainSystem:setEmissionRate(0)
+    end
+    self.rainSystem:update(dt)
 end
 
 --- Draw all active particle systems.
@@ -123,6 +145,7 @@ function Particles:draw()
     for _, ps in ipairs(self.systems) do
         love.graphics.draw(ps)
     end
+    love.graphics.draw(self.rainSystem)
 end
 
 return Particles
