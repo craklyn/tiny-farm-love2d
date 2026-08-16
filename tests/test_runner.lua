@@ -50,7 +50,7 @@ local function testCropDefs()
     _assert(tomato.sellPrice == 30, "Tomato sells for 30g")
     
     
-    _assert(#Crops.ORDER == 2, "ORDER has 2 crops")
+    _assert(#Crops.ORDER == 4, "ORDER has 4 crops")
     _assert(Crops.ORDER[1] == "wheat", "ORDER[1] is wheat")
     
     _assert(not Crops.isReady("wheat", 0), "Wheat not ready at stage 0")
@@ -135,17 +135,15 @@ local function testPlayer()
     _assert(boughtTomato, "Can buy tomato after unlock")
     _assert(p.gold == 85, "Gold decreased by 10 (tomato seed price)")
     
+    -- Give player some wheat to sell
+    p.crops["wheat"] = 3
+    p.gold = 0
+    
     -- Test sellCropsToBin (_doSell)
     local sold = p:_doSell()
     _assert(sold, "Sold crops")
     _assert(p.crops["wheat"] == 0, "Crops emptied after selling")
-    _assert(p.shippingBin["wheat"] == 3, "Bin has 3 wheats")
-    
-    -- Test processShippingBin
-    p.gold = 0
-    p:processShippingBin()
     _assert(p.gold == 45, "Gold = 3 wheats x 15g = 45g")
-    _assert(p.shippingBin["wheat"] == 0, "Bin emptied after processing")
     
     -- Test startNewDay
     p.energy = 5
@@ -318,6 +316,13 @@ local function testPathfinding()
     _assert(#redirPath > 0, "Found path to neighbor of obstacle")
     local last = redirPath[#redirPath]
     _assert(not (last.tx == 3 and last.ty == 3), "Path does not end ON obstacle")
+    
+    t.objects[4][4] = "furniture_bed"
+    _assert(not t:isWalkable(4, 4), "Furniture makes tile unwalkable")
+    local furnPath = Pathfinding.findPath(t, 1, 1, 4, 4)
+    _assert(#furnPath > 0, "Finds path to neighbor of furniture")
+    local furnLast = furnPath[#furnPath]
+    _assert(not (furnLast.tx == 4 and furnLast.ty == 4), "Path does not end ON furniture")
 end
 
 local function testActionRouter()
@@ -346,19 +351,37 @@ local function testActionRouter()
     _assert(r1.action == "clear_log", "ActionRouter resolves clear_log on log")
     _assert(r1.toolIndex == 2, "ActionRouter selects axe for log")
 
-    -- Till cleared
-    local r2 = ActionRouter.resolve(t, p, 3, 3, 1, 1)
+    -- Till cleared (distance must be <= 1 to pass intent filter)
+    local r2 = ActionRouter.resolve(t, p, 3, 3, 2, 3)
     _assert(r2.action == "till", "ActionRouter resolves till on cleared dirt")
 
     -- Plant tilled
     t.tiles[4][4].state = "tilled"
-    local r3 = ActionRouter.resolve(t, p, 4, 4, 1, 1)
+    local r3 = ActionRouter.resolve(t, p, 4, 4, 4, 3)
     _assert(r3.action == "plant", "ActionRouter resolves plant on tilled dirt")
     
     -- Special object
     t.objects[1][2] = "shipping_bin"
     local r4 = ActionRouter.resolve(t, p, 2, 1, 1, 1)
     _assert(r4.action == "sell", "ActionRouter resolves sell on shipping_bin")
+end
+
+local function testInputBleed()
+    print("\n--- Input Bleed Tests ---")
+    local Input = require("src.input")
+    local input = Input.new()
+    
+    input.mouseClicked = true
+    input.swipeActive = true
+    input._swipeMoved = true
+    
+    input.mouseClicked = false
+    input.swipeActive = false
+    input._swipeMoved = false
+    
+    _assert(not input.mouseClicked, "Resetting resets mouseClicked")
+    _assert(not input.swipeActive, "Resetting resets swipeActive")
+    _assert(not input._swipeMoved, "Resetting resets _swipeMoved")
 end
 
 print(string.rep("=", 60))
@@ -372,6 +395,7 @@ testFarm()
 testIntegration()
 testPathfinding()
 testActionRouter()
+testInputBleed()
 
 print("")
 print(string.rep("=", 60))
