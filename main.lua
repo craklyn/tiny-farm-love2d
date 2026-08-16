@@ -19,9 +19,13 @@ local Pathfinding = require("src.pathfinding")
 local AudioManager = require("src.audio_manager")
 local TitleScreen  = require("src.title_screen")
 
+local Crow = require("src.crow")
+
 -- Game state
 local gameState = "title"  -- "title", "playing"
 local camera, input, tilemap, player, particles, dayCycle, hud, uiMenus
+
+local DEBUG_MODE = false
 
 function love.load()
     -- Pixel art rendering: disable smoothing
@@ -68,6 +72,47 @@ function love.load()
     
     AudioManager.init()
     TitleScreen.init()
+    
+    if DEBUG_MODE then
+        player.gold = 9999
+        player.seeds.scarecrow = 5
+        
+        -- Plant a row of wheat and tomato at every growth stage
+        local startX = 12
+        local startY = 4
+        
+        -- Clear area
+        for y = startY, startY + 3 do
+            for x = startX, startX + 7 do
+                tilemap:setTileState(x, y, "tilled")
+            end
+        end
+        
+        -- Row 1: Wheat
+        for i = 0, 5 do
+            tilemap:setTileState(startX + i, startY, "seeded", "wheat")
+            tilemap:getTile(startX + i, startY).growthStage = i
+            if i >= Crops.TYPES["wheat"].daysToGrow then
+                tilemap:getTile(startX + i, startY).state = "ready"
+            elseif i > 0 then
+                tilemap:getTile(startX + i, startY).state = "growing"
+            end
+        end
+        
+        -- Row 2: Tomato
+        for i = 0, 5 do
+            tilemap:setTileState(startX + i, startY + 2, "seeded", "tomato")
+            tilemap:getTile(startX + i, startY + 2).growthStage = i
+            if i >= Crops.TYPES["tomato"].daysToGrow then
+                tilemap:getTile(startX + i, startY + 2).state = "ready"
+            elseif i > 0 then
+                tilemap:getTile(startX + i, startY + 2).state = "growing"
+            end
+        end
+        
+        -- Skip title screen for quick testing
+        gameState = "playing"
+    end
 end
 
 function love.update(dt)
@@ -117,7 +162,7 @@ function love.update(dt)
     -- Player movement & path following
     player:update(dt, input, tilemap)
     
-    Entities.update(dt, tilemap)
+    Entities.update(dt, tilemap, player)
 
     -- === Check for queued results from pathfinding-triggered actions ===
     if player._queuedResult then
@@ -252,11 +297,30 @@ function love.keypressed(key)
     -- Seed type cycling with number keys when Seeds tool is active
     local currentTool = Tools.LIST[player.selectedTool]
     if currentTool and currentTool.name == "Seeds" and not uiMenus:isOpen() then
-        if key == "1" then player.selectedSeedType = "carrot"
+        if key == "1" then player.selectedSeedType = "wheat"
         elseif key == "2" and Crops.isSeedUnlocked("tomato", player.harvestCounts) then 
             player.selectedSeedType = "tomato"
-        elseif key == "3" and Crops.isSeedUnlocked("sunflower", player.harvestCounts) then 
-            player.selectedSeedType = "sunflower"
+        elseif key == "3" and Crops.isSeedUnlocked("scarecrow", player.harvestCounts) then 
+            player.selectedSeedType = "scarecrow"
+        end
+    end
+    
+    -- Debug hotkeys
+    if DEBUG_MODE and key == "c" then
+        -- Spawn crow targeting a random crop
+        local targets = {}
+        for ty = 1, tilemap.HEIGHT do
+            for tx = 1, tilemap.WIDTH do
+                local tile = tilemap:getTile(tx, ty)
+                if tile and (tile.state == "growing" or tile.state == "ready" or tile.state == "seeded") then
+                    table.insert(targets, {tx = tx, ty = ty})
+                end
+            end
+        end
+        if #targets > 0 then
+            local target = targets[math.random(1, #targets)]
+            local startX, startY = -32, -32
+            Entities.add(Crow.new(startX, startY, target.tx, target.ty))
         end
     end
 end
@@ -275,7 +339,8 @@ function love.gamepadpressed(joystick, button)
     end
 end
 
-function love.mousepressed(x, y, button)
+function love.mousepressed(x, y, button, istouch, presses)
+    if istouch then return end
     if gameState == "title" then
         gameState = TitleScreen.mousepressed(x, y, button)
         if gameState == "game" then input.hasClick = false end
