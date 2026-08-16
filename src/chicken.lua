@@ -46,6 +46,12 @@ function Chicken:update(dt, tilemap)
         end
         
         local target = self.path[self.pathIndex]
+        if not tilemap:isWalkable(target.tx, target.ty) then
+            self.state = "idle"
+            self.path = nil
+            self.timer = 0
+            return
+        end
         local targetX = (target.tx - 1) * 16
         local targetY = (target.ty - 1) * 16
         

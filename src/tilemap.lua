@@ -256,6 +256,10 @@ function Tilemap:isWalkable(tx, ty)
     if state == "obstacle_rock" or state == "obstacle_log" or state == "obstacle_weed" then
         return false
     end
+    local obj = self:getObject(tx, ty)
+    if obj and obj ~= "egg" then
+        return false
+    end
     return true
 end
 
