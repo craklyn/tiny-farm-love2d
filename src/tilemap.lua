@@ -30,6 +30,7 @@ Tilemap.OBJECTS = {
     SHIPPING_BIN = "shipping_bin",
     WELL = "well",
     SEED_BOX = "seed_box",
+    SCARECROW = "scarecrow",
 }
 
 -- Fixed object positions (tile coords, 1-indexed)
@@ -258,6 +259,27 @@ function Tilemap:isWalkable(tx, ty)
     return true
 end
 
+--- Check if a tile is within the radius of a scarecrow.
+-- @param tx number
+-- @param ty number
+-- @return boolean
+function Tilemap:isProtectedByScarecrow(tx, ty)
+    local radius = 5
+    for sy = math.max(1, ty - radius), math.min(self.HEIGHT, ty + radius) do
+        for sx = math.max(1, tx - radius), math.min(self.WIDTH, tx + radius) do
+            if self:getObject(sx, sy) == "scarecrow" then
+                -- Check Euclidean distance
+                local dx = sx - tx
+                local dy = sy - ty
+                if math.sqrt(dx*dx + dy*dy) <= radius then
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+
 --- Set tile state with validation.
 -- @param tx number
 -- @param ty number
@@ -415,6 +437,33 @@ function Tilemap:queueEntities(renderQueue)
                         -- Egg
                         love.graphics.setColor(1, 1, 1, 1)
                         love.graphics.ellipse("fill", px + 8, py + 10, 3, 4)
+                    end
+                })
+            elseif obj == "scarecrow" then
+                table.insert(renderQueue, {
+                    y = py,
+                    draw = function()
+                        -- Stick pole
+                        love.graphics.setColor(0.6, 0.4, 0.2, 1)
+                        love.graphics.rectangle("fill", px + 6, py - 4, 4, 16)
+                        
+                        -- Arms (cross)
+                        love.graphics.rectangle("fill", px - 2, py + 2, 20, 3)
+                        
+                        -- Body (shirt)
+                        love.graphics.setColor(0.3, 0.4, 0.8, 1)
+                        love.graphics.rectangle("fill", px + 2, py + 1, 12, 10)
+                        
+                        -- Head (pumpkin/hay)
+                        love.graphics.setColor(0.9, 0.8, 0.4, 1)
+                        love.graphics.circle("fill", px + 8, py - 2, 5)
+                        
+                        -- Hat
+                        love.graphics.setColor(0.4, 0.3, 0.2, 1)
+                        love.graphics.rectangle("fill", px + 1, py - 6, 14, 2)
+                        love.graphics.rectangle("fill", px + 4, py - 10, 8, 4)
+                        
+                        love.graphics.setColor(1, 1, 1, 1)
                     end
                 })
             else

@@ -26,10 +26,18 @@ Crops.TYPES = {
         name = "Egg",
         sellPrice = 10,
     },
+    scarecrow = {
+        name = "Scarecrow",
+        seedPrice = 50,
+        isObject = true,
+        stages = 1,
+        unlockRequirement = nil,
+        spriteRow = 4, -- Placeholder or actual if we have a sprite
+    },
 }
 
 -- Order for UI display / seed selection
-Crops.ORDER = { "wheat", "tomato", "egg" }
+Crops.ORDER = { "wheat", "tomato", "scarecrow", "egg" }
 
 --- Check if a crop at the given growth stage is ready to harvest.
 -- @param cropType string: key in TYPES

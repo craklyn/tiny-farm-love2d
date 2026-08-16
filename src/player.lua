@@ -36,6 +36,8 @@ function Player.new(startTX, startTY)
     self.day = 1
     self.weather = "sunny"
     
+    self.spookRadius = 3 * TILE_SIZE
+    
     -- Inventory
     self.selectedTool = 1  -- index into Tools.LIST
     self.selectedSeedType = "wheat"  -- which seed to plant when using Seeds tool
@@ -394,6 +396,19 @@ function Player:tryAction(tilemap, particles)
         return "sleep"
     end
     
+    -- Scarecrow: collect it back into inventory
+    if obj == "scarecrow" then
+        self.seeds["scarecrow"] = (self.seeds["scarecrow"] or 0) + 1
+        tilemap.objects[ptx][pty] = nil
+        AudioManager.playSfx("harvest")
+        return "collect"
+    elseif adjObj == "scarecrow" then
+        self.seeds["scarecrow"] = (self.seeds["scarecrow"] or 0) + 1
+        tilemap.objects[tx][ty] = nil
+        AudioManager.playSfx("harvest")
+        return "collect"
+    end
+    
     -- Regular tile action
     local tile = tilemap:getTile(tx, ty)
     if not tile then return nil end
@@ -408,7 +423,7 @@ function Player:tryAction(tilemap, particles)
     if action == "water" and self.wateringCanCharges <= 0 then
         return nil
     end
-    if action == "plant" and self.seeds[self.selectedSeedType] <= 0 then
+    if action == "plant" and (not self.seeds[self.selectedSeedType] or self.seeds[self.selectedSeedType] <= 0) then
         return nil
     end
     
@@ -426,7 +441,12 @@ function Player:tryAction(tilemap, particles)
         if particles then particles:emit("dirt", (tx - 1) * TILE_SIZE + 8, (ty - 1) * TILE_SIZE + 8) end
         AudioManager.playSfx("till")
     elseif action == "plant" then
-        tilemap:setTileState(tx, ty, "seeded", self.selectedSeedType)
+        local def = Crops.TYPES[self.selectedSeedType]
+        if def and def.isObject then
+            tilemap.objects[ty][tx] = self.selectedSeedType
+        else
+            tilemap:setTileState(tx, ty, "seeded", self.selectedSeedType)
+        end
         self.seeds[self.selectedSeedType] = self.seeds[self.selectedSeedType] - 1
     elseif action == "water" then
         tilemap:waterTile(tx, ty)
@@ -465,6 +485,10 @@ function Player:_executeResolvedAction(pa, tilemap, particles)
         if tilemap.objects[ty] and tilemap.objects[ty][tx] == "egg" then
             tilemap.objects[ty][tx] = nil
             self.crops["egg"] = (self.crops["egg"] or 0) + 1
+            AudioManager.playSfx("harvest")
+        elseif tilemap.objects[ty] and tilemap.objects[ty][tx] == "scarecrow" then
+            tilemap.objects[ty][tx] = nil
+            self.seeds["scarecrow"] = (self.seeds["scarecrow"] or 0) + 1
             AudioManager.playSfx("harvest")
         end
         return
@@ -511,8 +535,16 @@ function Player:_executeResolvedAction(pa, tilemap, particles)
         if particles then particles:emit("dirt", (tx-1)*TILE_SIZE+8, (ty-1)*TILE_SIZE+8) end
         AudioManager.playSfx("till")
     elseif action == "plant" then
-        tilemap:setTileState(tx, ty, "seeded", seedType)
-        self.seeds[seedType] = self.seeds[seedType] - 1
+        local def = Crops.TYPES[seedType]
+        if def and def.isObject then
+            if not tilemap.objects[ty][tx] then
+                tilemap.objects[ty][tx] = seedType
+                self.seeds[seedType] = self.seeds[seedType] - 1
+            end
+        else
+            tilemap:setTileState(tx, ty, "seeded", seedType)
+            self.seeds[seedType] = self.seeds[seedType] - 1
+        end
     elseif action == "water" then
         tilemap:waterTile(tx, ty)
         self.wateringCanCharges = self.wateringCanCharges - 1
