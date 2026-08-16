@@ -40,9 +40,7 @@ function Entities.update(dt, tilemap, player)
             for tx = 1, tilemap.WIDTH do
                 local tile = tilemap:getTile(tx, ty)
                 if tile and (tile.state == "growing" or tile.state == "ready" or tile.state == "seeded") then
-                    if not tilemap:isProtectedByScarecrow(tx, ty) then
-                        table.insert(targets, {tx = tx, ty = ty})
-                    end
+                    table.insert(targets, {tx = tx, ty = ty})
                 end
             end
         end
