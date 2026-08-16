@@ -25,7 +25,7 @@ local Crow = require("src.crow")
 local gameState = "title"  -- "title", "playing"
 local camera, input, tilemap, player, particles, dayCycle, hud, uiMenus
 
-local DEBUG_MODE = false
+local DEBUG_MODE = true
 
 function love.load()
     -- Pixel art rendering: disable smoothing
@@ -342,8 +342,12 @@ end
 function love.mousepressed(x, y, button, istouch, presses)
     if istouch then return end
     if gameState == "title" then
-        gameState = TitleScreen.mousepressed(x, y, button)
-        if gameState == "game" then input.hasClick = false end
+        local newState = TitleScreen.mousepressed(x, y, button)
+        if newState == "playing" then
+            gameState = "playing"
+            input.hasClick = false
+            input.swipeActive = false
+        end
         return
     end
 
@@ -376,7 +380,12 @@ end
 
 function love.touchpressed(id, x, y, dx, dy, pressure)
     if gameState == "title" then
-        gameState = TitleScreen.mousepressed(x, y, 1)
+        local newState = TitleScreen.mousepressed(x, y, 1)
+        if newState == "playing" then
+            gameState = "playing"
+            input.hasClick = false
+            input.swipeActive = false
+        end
         return
     end
 
