@@ -35,10 +35,10 @@ Tilemap.OBJECTS = {
 
 -- Fixed object positions (tile coords, 1-indexed)
 Tilemap.OBJECT_POSITIONS = {
-    { type = "cot",          tx = 3,  ty = 2 },
-    { type = "shipping_bin", tx = 5,  ty = 2 },
-    { type = "well",         tx = 7,  ty = 2 },
-    { type = "seed_box",     tx = 9,  ty = 2 },
+    { type = "cot",          tx = 3,  ty = 4 },
+    { type = "shipping_bin", tx = 5,  ty = 4 },
+    { type = "potted_sprout",tx = 7,  ty = 4 },
+    { type = "seed_box",     tx = 9,  ty = 4 },
 }
 
 function Tilemap.new()
@@ -134,12 +134,12 @@ function Tilemap:init()
         end
     end
     
-    -- Create object quads from correct spritesheets
+    -- Create object quads from correct spritesheets based on Vision API mappings
     self.objectDefs = {
-        cot = { image = self.furnitureImage, quad = love.graphics.newQuad(0 * 16, 0 * 16, 16, 32, self.furnitureImage:getDimensions()), offsetY = -16 },
-        well = { image = self.furnitureImage, quad = love.graphics.newQuad(4 * 16, 0 * 16, 16, 32, self.furnitureImage:getDimensions()), offsetY = -16 },
+        cot = { image = self.furnitureImage, quad = love.graphics.newQuad(0 * 16, 2 * 16, 16, 16, self.furnitureImage:getDimensions()), offsetY = 0 },
+        potted_sprout = { image = self.furnitureImage, quad = love.graphics.newQuad(4 * 16, 0 * 16, 16, 16, self.furnitureImage:getDimensions()), offsetY = 0 },
         shipping_bin = { image = self.chestImage, quad = love.graphics.newQuad(1 * 16, 1 * 16, 16, 16, self.chestImage:getDimensions()), offsetY = 0 },
-        seed_box = { image = self.furnitureImage, quad = love.graphics.newQuad(5 * 16, 2 * 16, 16, 32, self.furnitureImage:getDimensions()), offsetY = -16 }
+        seed_box = { image = self.furnitureImage, quad = love.graphics.newQuad(3 * 16, 0 * 16, 16, 16, self.furnitureImage:getDimensions()), offsetY = 0 }
     }
     
     -- Load biomes (obstacles)
@@ -178,9 +178,9 @@ function Tilemap:init()
     for _, obj in ipairs(self.OBJECT_POSITIONS) do
         self.tiles[obj.ty][obj.tx] = self:_createTile("cleared")
         self.objects[obj.ty][obj.tx] = obj.type
-        -- Also clear surrounding tiles for accessibility
-        for dy = -1, 1 do
-            for dx = -1, 1 do
+        -- Also clear surrounding tiles for accessibility (North/West/South/East)
+        for dy = -2, 2 do
+            for dx = -2, 2 do
                 local nx, ny = obj.tx + dx, obj.ty + dy
                 if nx >= 2 and nx <= self.WIDTH - 1 and ny >= 2 and ny <= self.HEIGHT - 1 then
                     if not self.objects[ny][nx] then
@@ -194,7 +194,7 @@ function Tilemap:init()
     -- Ensure player spawn area (around cot) is clear
     for dy = 0, 2 do
         for dx = 0, 10 do
-            local tx, ty = 2 + dx, 2 + dy
+            local tx, ty = 2 + dx, 4 + dy
             if tx <= self.WIDTH - 1 and ty <= self.HEIGHT - 1 then
                 if not self.objects[ty][tx] then
                     self.tiles[ty][tx] = self:_createTile("cleared")
@@ -232,13 +232,6 @@ end
 function Tilemap:getObject(tx, ty)
     if self.objects[ty] and self.objects[ty][tx] then
         return self.objects[ty][tx]
-    end
-    -- Check if the tile below has a tall object
-    if self.objects[ty+1] and self.objects[ty+1][tx] then
-        local objBelow = self.objects[ty+1][tx]
-        if objBelow == "cot" or objBelow == "well" or objBelow == "seed_box" then
-            return objBelow
-        end
     end
     return nil
 end
@@ -476,6 +469,11 @@ function Tilemap:queueEntities(renderQueue)
                     table.insert(renderQueue, {
                         y = py, -- Objects have height
                         draw = function()
+                            -- Grounding drop shadow
+                            love.graphics.setColor(0, 0, 0, 0.4)
+                            love.graphics.ellipse("fill", px + 8, py + 14, 6, 3)
+                            love.graphics.setColor(1, 1, 1, 1)
+
                             love.graphics.draw(objDef.image, objDef.quad, px, py + (objDef.offsetY or 0))
                         end
                     })

@@ -7,18 +7,37 @@ local ActionRouter = require("src.action_router")
 local HUD = {}
 HUD.__index = HUD
 
+-- Centralized theme configuration
+local UI_THEME = {
+    colors = {
+        text_light = {0.96, 0.92, 0.90, 1}, -- Warm Off-White (#F5EBE6)
+        text_gold = {0.95, 0.77, 0.18, 1},  -- Warm Gold (#F4C430)
+        energy_fill = {0.35, 0.70, 0.33, 1}, -- Muted Emerald (#5BB356)
+        energy_low = {0.8, 0.2, 0.2, 0.9},
+        energy_bg = {0.07, 0.10, 0.06, 0.9}, -- Near-Black Green (#121A11)
+        water = {0.3, 0.6, 0.9, 1}
+    },
+    padding = {
+        x = 12,
+        y = 8
+    },
+    safe_zone_top = 16,
+    safe_zone_bottom = 16,
+    safe_zone_side = 16
+}
+
 function HUD.new()
     local self = setmetatable({}, HUD)
     self.toolIconsImage = nil
     self.toolIconQuads = {}
     
-    -- Milestone toast
     self.toastMessage = nil
     self.toastTimer = 0
     self.TOAST_DURATION = 3.0
-    
-    -- Milestone tracking
     self.milestonesEarned = {}
+    
+    self.uiPanelImage = nil
+    self.uiPanelQuads = {}
     
     return self
 end
@@ -33,10 +52,24 @@ function HUD:init()
             self.toolIconsImage:getDimensions()
         )
     end
+    
+    self.uiPanelImage = love.graphics.newImage("assets/sprites/ui_wood_panel.png")
+    self.uiPanelImage:setFilter("nearest", "nearest")
+    local iw, ih = self.uiPanelImage:getDimensions()
+    -- 9-slice quads (16px corners)
+    self.uiPanelQuads = {
+        love.graphics.newQuad(0, 0, 16, 16, iw, ih),
+        love.graphics.newQuad(16, 0, 16, 16, iw, ih),
+        love.graphics.newQuad(32, 0, 16, 16, iw, ih),
+        love.graphics.newQuad(0, 16, 16, 16, iw, ih),
+        love.graphics.newQuad(16, 16, 16, 16, iw, ih),
+        love.graphics.newQuad(32, 16, 16, 16, iw, ih),
+        love.graphics.newQuad(0, 32, 16, 16, iw, ih),
+        love.graphics.newQuad(16, 32, 16, 16, iw, ih),
+        love.graphics.newQuad(32, 32, 16, 16, iw, ih)
+    }
 end
 
---- Check and trigger milestones.
--- @param player Player
 function HUD:checkMilestones(player)
     local totalHarvests = 0
     for _, count in pairs(player.harvestCounts) do
@@ -44,14 +77,14 @@ function HUD:checkMilestones(player)
     end
     
     local milestones = {
-        { id = "first_harvest", condition = totalHarvests >= 1, msg = "🌾 First Harvest!" },
-        { id = "green_thumb",   condition = totalHarvests >= 10, msg = "🌿 Green Thumb!" },
-        { id = "golden_field",  condition = player.gold >= 500, msg = "💰 Golden Field!" },
+        { id = "first_harvest", condition = totalHarvests >= 1, msg = "First Harvest!" },
+        { id = "green_thumb",   condition = totalHarvests >= 10, msg = "Green Thumb!" },
+        { id = "golden_field",  condition = player.gold >= 500, msg = "Golden Field!" },
         { id = "master_farmer", condition = (
             player.harvestCounts.wheat >= 1 and
             player.harvestCounts.tomato >= 1 and
             player.harvestCounts.wheat >= 1
-        ), msg = "👨‍🌾 Master Farmer!" },
+        ), msg = "Master Farmer!" },
     }
     
     for _, m in ipairs(milestones) do
@@ -62,15 +95,11 @@ function HUD:checkMilestones(player)
     end
 end
 
---- Show a toast notification.
--- @param message string
 function HUD:showToast(message)
     self.toastMessage = message
     self.toastTimer = self.TOAST_DURATION
 end
 
---- Update HUD state (toast timers, etc.).
--- @param dt number
 function HUD:update(dt)
     if self.toastTimer > 0 then
         self.toastTimer = self.toastTimer - dt
@@ -80,154 +109,161 @@ function HUD:update(dt)
     end
 end
 
---- Draw the HUD overlay (call AFTER camera:release, in screen space).
--- @param player Player
--- @param tilemap Tilemap (for cursor info)
--- @param camera Camera
--- @param input Input
 function HUD:draw(player, tilemap, camera, input)
-    local sw = love.graphics.getWidth()
-    local sh = love.graphics.getHeight()
+    local sw, sh = love.graphics.getWidth(), love.graphics.getHeight()
     local font = love.graphics.getFont()
     local fh = font:getHeight()
     
-    -- === Top Bar Background ===
-    love.graphics.setColor(0, 0, 0, 0.6)
-    love.graphics.rectangle("fill", 0, 0, sw, fh + 12)
-    love.graphics.setColor(1, 1, 1, 1)
+    self:drawHeader(player, sw, sh, font, fh)
+    self:drawControls(player, sw, sh, font, fh)
     
-    -- Day counter (top-left)
-    love.graphics.setColor(0.9, 0.9, 0.8, 1)
-    love.graphics.print("Day " .. player.day, 10, 6)
-    
-    -- Weather
-    local wIcon = player.weather == "sunny" and "☀️" or "🌧️"
-    local weatherText = wIcon .. " " .. player.weather:gsub("^%l", string.upper)
-    love.graphics.setColor(0.6, 0.8, 1, 1)
-    love.graphics.print(weatherText, 80, 6)
-    
-    -- Energy (top-center)
-    local energyText = string.format("Energy: %d/%d", player.energy, player.maxEnergy)
-    local etw = font:getWidth(energyText)
-    -- Energy bar background
-    local barX = sw / 2 - 60
-    local barY = 6
-    local barW = 120
-    local barH = fh
-    love.graphics.setColor(0.2, 0.2, 0.2, 0.8)
-    love.graphics.rectangle("fill", barX, barY, barW, barH)
-    -- Energy bar fill
-    local fill = player.energy / player.maxEnergy
-    local r = 0.3 + 0.7 * (1 - fill)  -- Red when low
-    local g = 0.3 + 0.7 * fill         -- Green when high
-    love.graphics.setColor(r, g, 0.2, 0.9)
-    love.graphics.rectangle("fill", barX + 1, barY + 1, (barW - 2) * fill, barH - 2)
-    -- Energy text
-    love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.print(energyText, sw / 2 - etw / 2, 6)
-    
-    -- Gold (top-right)
-    local goldText = string.format("%dg", player.gold)
-    local gtw = font:getWidth(goldText)
-    love.graphics.setColor(1, 0.85, 0.2, 1)
-    love.graphics.print(goldText, sw - gtw - 10, 6)
-    
-    -- === Bottom Bar Background ===
-    local bottomY = sh - fh - 16
-    love.graphics.setColor(0, 0, 0, 0.6)
-    love.graphics.rectangle("fill", 0, bottomY, sw, fh + 16)
-    love.graphics.setColor(1, 1, 1, 1)
-    
-    -- Current tool (bottom-left)
-    local tool = Tools.LIST[player.selectedTool]
-    if tool and self.toolIconQuads[tool.icon] then
-        love.graphics.draw(self.toolIconsImage, self.toolIconQuads[tool.icon],
-            10, bottomY + 2, 0, 2, 2)  -- 2x scale
-    end
-    love.graphics.setColor(0.9, 0.9, 0.8, 1)
-    love.graphics.print(tool and tool.name or "?", 46, bottomY + 8)
-    
-    -- Seed type indicator (when Seeds tool is selected)
-    if tool and tool.name == "Seeds" then
-        local seedInfo = string.format(" [%s x%d]", 
-            player.selectedSeedType, 
-            player.seeds[player.selectedSeedType] or 0)
-        local toolNameWidth = font:getWidth(tool.name)
-        love.graphics.setColor(0.6, 0.9, 0.4, 1)
-        love.graphics.print(seedInfo, 46 + toolNameWidth, bottomY + 8)
-    end
-    
-    -- Seed counts (bottom-center)
-    local seedX = sw / 2 - 80
-    for i, cropName in ipairs(Crops.ORDER) do
-        local count = player.seeds[cropName] or 0
-        local emoji = ({ wheat = "Wh", tomato = "To" })[cropName]
-        local text = string.format("%s:%d", emoji, count)
-        
-        if Crops.isSeedUnlocked(cropName, player.harvestCounts) then
-            love.graphics.setColor(0.8, 0.9, 0.7, 1)
-        else
-            love.graphics.setColor(0.4, 0.4, 0.4, 0.6)
-        end
-        love.graphics.print(text, seedX + (i - 1) * 55, bottomY + 8)
-    end
-    
-    -- Watering can charges (bottom-right)
-    local waterText = string.format("Water: %d/%d", player.wateringCanCharges, player.maxWateringCanCharges)
-    local wtw = font:getWidth(waterText)
-    love.graphics.setColor(0.4, 0.7, 0.95, 1)
-    love.graphics.print(waterText, sw - wtw - 10, bottomY + 8)
-
-    -- === Active Seed Pill (touch-first: always visible, tap to cycle) ===
-    local seedName = player.selectedSeedType
-    local seedCount = player.seeds[seedName] or 0
-    local seedEmoji = ({ wheat = "🌾", tomato = "🍅" })[seedName] or "?"
-    local pillText = string.format("%s %s x%d", seedEmoji, seedName, seedCount)
-    local pillW = font:getWidth(pillText) + 24
-    local pillH = fh + 10
-    local pillX = sw / 2 - pillW / 2
-    local pillY = bottomY - pillH - 6
-
-    -- Pill background (greener when seeds are available, grey if empty)
-    if seedCount > 0 then
-        love.graphics.setColor(0.18, 0.52, 0.22, 0.88)
-    else
-        love.graphics.setColor(0.25, 0.25, 0.25, 0.75)
-    end
-    love.graphics.rectangle("fill", pillX, pillY, pillW, pillH, pillH/2, pillH/2)
-    -- Border
-    love.graphics.setColor(1, 1, 1, 0.3)
-    love.graphics.setLineWidth(1)
-    love.graphics.rectangle("line", pillX, pillY, pillW, pillH, pillH/2, pillH/2)
-    -- Text
-    love.graphics.setColor(1, 1, 0.9, 1)
-    love.graphics.print(pillText, pillX + 12, pillY + 5)
-
-    -- Store pill bounds for touch detection in main.lua
-    self.seedPillBounds = { x = pillX, y = pillY, w = pillW, h = pillH }
-    
-    -- === Tile Cursor (mouse mode) ===
     if input.mode == "mouse" then
         self:_drawTileCursor(player, tilemap, camera, input)
     end
     
-    -- === Toast Notification ===
-    if self.toastMessage and self.toastTimer > 0 then
-        local alpha = math.min(1, self.toastTimer)  -- Fade out in last second
-        local tw = font:getWidth(self.toastMessage)
-        local tx = sw / 2 - tw / 2 - 10
-        local ty = sh / 2 - 40
-        
-        love.graphics.setColor(0.1, 0.1, 0.15, 0.85 * alpha)
-        love.graphics.rectangle("fill", tx, ty, tw + 20, fh + 16, 6, 6)
-        love.graphics.setColor(1, 0.95, 0.5, alpha)
-        love.graphics.print(self.toastMessage, tx + 10, ty + 8)
-    end
+    self:drawToast(sw, sh, font, fh)
     
     love.graphics.setColor(1, 1, 1, 1)
 end
 
---- Draw the tile cursor highlight when using mouse input.
+function HUD:drawPanel(x, y, w, h)
+    local img = self.uiPanelImage
+    local q = self.uiPanelQuads
+    local c = 16 -- corner size
+    local cw, ch = 16, 16 -- center size of image
+    local mw, mh = w - c*2, h - c*2 -- center size of target
+    
+    if mw < 0 then mw = 0 end
+    if mh < 0 then mh = 0 end
+    
+    love.graphics.setColor(1, 1, 1, 1)
+    
+    -- Draw corners
+    love.graphics.draw(img, q[1], x, y)
+    love.graphics.draw(img, q[3], x + w - c, y)
+    love.graphics.draw(img, q[7], x, y + h - c)
+    love.graphics.draw(img, q[9], x + w - c, y + h - c)
+    
+    -- Draw top and bottom edges (tiled horizontally)
+    if mw > 0 then
+        love.graphics.setScissor(x + c, y, mw, h)
+        for i = 0, math.ceil(mw / cw) - 1 do
+            local sx = (i % 2 == 1) and -1 or 1
+            local ox = (i % 2 == 1) and cw or 0
+            love.graphics.draw(img, q[2], x + c + i * cw, y, 0, sx, 1, ox, 0)
+            love.graphics.draw(img, q[8], x + c + i * cw, y + h - c, 0, sx, 1, ox, 0)
+        end
+        love.graphics.setScissor()
+    end
+    
+    -- Draw left and right edges (tiled vertically)
+    if mh > 0 then
+        love.graphics.setScissor(x, y + c, w, mh)
+        for j = 0, math.ceil(mh / ch) - 1 do
+            local sy = (j % 2 == 1) and -1 or 1
+            local oy = (j % 2 == 1) and ch or 0
+            love.graphics.draw(img, q[4], x, y + c + j * ch, 0, 1, sy, 0, oy)
+            love.graphics.draw(img, q[6], x + w - c, y + c + j * ch, 0, 1, sy, 0, oy)
+        end
+        love.graphics.setScissor()
+    end
+    
+    -- Draw center (tiled horizontally and vertically)
+    if mw > 0 and mh > 0 then
+        love.graphics.setScissor(x + c, y + c, mw, mh)
+        for i = 0, math.ceil(mw / cw) - 1 do
+            local sx = (i % 2 == 1) and -1 or 1
+            local ox = (i % 2 == 1) and cw or 0
+            for j = 0, math.ceil(mh / ch) - 1 do
+                local sy = (j % 2 == 1) and -1 or 1
+                local oy = (j % 2 == 1) and ch or 0
+                love.graphics.draw(img, q[5], x + c + i * cw, y + c + j * ch, 0, sx, sy, ox, oy)
+            end
+        end
+        love.graphics.setScissor()
+    end
+end
+
+function HUD:printShadow(text, x, y, color)
+    love.graphics.setColor(27/255, 16/255, 12/255, 1) -- #1B100C Solid Dark Chocolate Outline
+    love.graphics.print(text, x + 1, y + 1)
+    love.graphics.print(text, x + 2, y + 2)
+    love.graphics.setColor(color or UI_THEME.colors.text_light)
+    love.graphics.print(text, x, y)
+end
+
+function HUD:drawHeader(player, sw, sh, font, fh)
+    -- Unified top bar layout
+    local txtDay = string.format("DAY: %d", player.day)
+    local txtStamina = "STAMINA:"
+    
+    local wDay = font:getWidth(txtDay)
+    local wStamina = font:getWidth(txtStamina)
+    
+    local barW = 120
+    
+    local w = sw - UI_THEME.safe_zone_side * 2
+    local h = fh + UI_THEME.padding.y * 2
+    local x = UI_THEME.safe_zone_side
+    local y = UI_THEME.safe_zone_top
+    
+    self:drawPanel(x, y, w, h)
+    
+    -- Left: Day
+    self:printShadow(txtDay, x + UI_THEME.padding.x, y + UI_THEME.padding.y, UI_THEME.colors.text_light)
+    
+    -- Center: Stamina
+    local centerX = x + w / 2 - (wStamina + 10 + barW) / 2
+    self:printShadow(txtStamina, centerX, y + UI_THEME.padding.y, UI_THEME.colors.text_light)
+    
+    local fill = player.energy / player.maxEnergy
+    local barX = centerX + wStamina + 10
+    local barY = y + UI_THEME.padding.y + 4
+    local barH = fh - 8
+    
+    love.graphics.setColor(UI_THEME.colors.energy_bg)
+    love.graphics.rectangle("fill", barX, barY, barW, barH)
+    
+    if fill > 0.2 then
+        love.graphics.setColor(UI_THEME.colors.energy_fill)
+    else
+        love.graphics.setColor(UI_THEME.colors.energy_low)
+    end
+    love.graphics.rectangle("fill", barX, barY, barW * fill, barH)
+end
+
+function HUD:drawControls(player, sw, sh, font, fh)
+    local tool = Tools.LIST[player.selectedTool]
+    local toolName = tool and tool.name or "?"
+    
+    -- Active Seed Pill (Bottom Center)
+    local seedName = player.selectedSeedType
+    local seedCount = player.seeds[seedName] or 0
+    local seedNameDisplay = seedName:sub(1,1):upper() .. seedName:sub(2)
+    local seedText = string.format("%s x%d", seedNameDisplay, seedCount)
+    local seedW = font:getWidth(seedText) + UI_THEME.padding.x * 2
+    local seedH = fh + UI_THEME.padding.y * 2
+    local seedX = sw / 2 - seedW / 2
+    local seedY = sh - seedH - UI_THEME.safe_zone_bottom
+    
+    self:drawPanel(seedX, seedY, seedW, seedH)
+    local color = seedCount > 0 and UI_THEME.colors.text_light or {0.5, 0.5, 0.5, 1}
+    self:printShadow(seedText, seedX + UI_THEME.padding.x, seedY + UI_THEME.padding.y, color)
+    self.seedPillBounds = { x = seedX, y = seedY, w = seedW, h = seedH }
+    
+    -- Water status (Bottom Right)
+    if toolName == "Watering Can" then
+        local waterText = string.format("WATER: %d/%d", player.wateringCanCharges, player.maxWateringCanCharges)
+        local waterW = font:getWidth(waterText) + UI_THEME.padding.x * 2
+        local waterH = fh + UI_THEME.padding.y * 2
+        local waterX = sw - waterW - UI_THEME.safe_zone_side
+        local waterY = sh - waterH - UI_THEME.safe_zone_bottom
+        
+        self:drawPanel(waterX, waterY, waterW, waterH)
+        self:printShadow(waterText, waterX + UI_THEME.padding.x, waterY + UI_THEME.padding.y, UI_THEME.colors.water)
+    end
+end
+
 function HUD:_drawTileCursor(player, tilemap, camera, input)
     local mtx, mty = input:getMouseTile(camera)
     if not mtx or not mty then return end
@@ -235,10 +271,8 @@ function HUD:_drawTileCursor(player, tilemap, camera, input)
     local tile = tilemap:getTile(mtx, mty)
     if not tile then return end
 
-    -- Use ActionRouter for smart cursor coloring
     local r, g, b = ActionRouter.getCursorColor(tilemap, player, mtx, mty)
 
-    -- Draw cursor in world space
     local tileScreenSize = camera:getTileScreenSize()
     local sx, sy = camera:tileToScreen(mtx, mty)
     sx = sx - tileScreenSize / 2
@@ -248,6 +282,20 @@ function HUD:_drawTileCursor(player, tilemap, camera, input)
     love.graphics.setLineWidth(2)
     love.graphics.rectangle("line", sx, sy, tileScreenSize, tileScreenSize)
     love.graphics.setLineWidth(1)
+end
+
+function HUD:drawToast(sw, sh, font, fh)
+    if self.toastMessage and self.toastTimer > 0 then
+        local alpha = math.min(1, self.toastTimer)
+        local tw = font:getWidth(self.toastMessage)
+        local tx = sw / 2 - tw / 2 - 10
+        local ty = sh / 2 - 40
+        
+        love.graphics.setColor(0.1, 0.1, 0.15, 0.85 * alpha)
+        love.graphics.rectangle("fill", tx, ty, tw + 20, fh + 16, 6, 6)
+        love.graphics.setColor(1, 0.95, 0.5, alpha)
+        love.graphics.print(self.toastMessage, tx + 10, ty + 8)
+    end
 end
 
 return HUD

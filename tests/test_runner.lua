@@ -3,6 +3,22 @@ _G.love = {
     graphics = {
         newImage = function() return { setFilter = function() end, getDimensions = function() return 100, 100 end } end,
         newQuad = function() return {} end,
+        getWidth = function() return 800 end,
+        getHeight = function() return 600 end,
+        getFont = function() return { getHeight = function() return 16 end, getWidth = function() return 100 end } end,
+        setColor = function() end,
+        rectangle = function() end,
+        print = function() end,
+        setLineWidth = function() end,
+        draw = function() end,
+        push = function() end,
+        pop = function() end,
+        translate = function() end,
+        scale = function() end,
+        rotate = function() end,
+        captureScreenshot = function() end,
+        setScissor = function() end,
+        intersectScissor = function() end
     },
     audio = {
         newSource = function() return { setVolume = function() end, setLooping = function() end, play = function() end, clone = function() return { play = function() end, isPlaying = function() return false end } end } end
@@ -223,6 +239,49 @@ local function testFarm()
     _assert(t.tiles[3][3].state == "seeded", "Unwatered crop stays seeded")
 end
 
+local function testMapSpawnLogic()
+    print("\n--- Map Spawn Logic Tests ---")
+    local t = Tilemap.new()
+    t:init()
+    
+    local foundCot = false
+    local foundBin = false
+    
+    for ty = 1, Tilemap.HEIGHT do
+        for tx = 1, Tilemap.WIDTH do
+            local obj = t:getObject(tx, ty)
+            if obj == "cot" then
+                foundCot = true
+                -- Verify -2 to 2 clearance
+                for dy = -2, 2 do
+                    for dx = -2, 2 do
+                        local ny, nx = ty + dy, tx + dx
+                        if nx >= 2 and nx <= Tilemap.WIDTH - 1 and ny >= 2 and ny <= Tilemap.HEIGHT - 1 then
+                            local state = t:getTile(nx, ny).state
+                            _assert(state == "cleared", string.format("Tile near cot (%d,%d) is cleared, got %s", nx, ny, state))
+                        end
+                    end
+                end
+            elseif obj == "shipping_bin" then
+                foundBin = true
+                -- Verify -2 to 2 clearance
+                for dy = -2, 2 do
+                    for dx = -2, 2 do
+                        local ny, nx = ty + dy, tx + dx
+                        if nx >= 2 and nx <= Tilemap.WIDTH - 1 and ny >= 2 and ny <= Tilemap.HEIGHT - 1 then
+                            local state = t:getTile(nx, ny).state
+                            _assert(state == "cleared", string.format("Tile near bin (%d,%d) is cleared, got %s", nx, ny, state))
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    _assert(foundCot, "Found cot on initialized map")
+    _assert(foundBin, "Found shipping bin on initialized map")
+end
+
 local function testIntegration()
     print("\n--- Integration Tests (full game loop) ---")
     local p = Player.new(1, 1)
@@ -392,10 +451,68 @@ testCropDefs()
 testTools()
 testPlayer()
 testFarm()
+testMapSpawnLogic()
 testIntegration()
 testPathfinding()
 testActionRouter()
 testInputBleed()
+
+local function testCamera()
+    print("\n--- Camera Tests ---")
+    local Camera = require("src.camera")
+    local c = Camera.new(100, 100, 800, 600)
+    -- Map: 100 tiles * 16px * 3 scale = 4800x4800
+    -- Screen: 800x600
+    -- Safe margins: Top = 64, Bottom = 80
+    
+    -- Test top clamping
+    c:update(100.0, 0, 0) -- Pass large dt to snap to target
+    _assert(c.y == -120, "Camera Y correctly clamps to -SAFE_MARGIN_TOP (-120) at map top")
+    
+    -- Test bottom clamping
+    c:update(100.0, 1600, 1600) -- Target bottom right
+    -- maxY = 4800 - 600 = 4200
+    -- clamped maxY = 4200 + 80 = 4280
+    _assert(math.abs(c.y - 4280) < 0.1, "Camera Y correctly clamps to maxY + SAFE_MARGIN_BOTTOM (4280) at map bottom")
+end
+
+testCamera()
+
+local function testHUD()
+    print("\n--- HUD Tests ---")
+    local HUD = require("src.hud")
+    local h = HUD.new()
+    h:init()
+    
+    local p = Player.new(1, 1)
+    p.seeds["wheat"] = 3
+    p.seeds["scarecrow"] = 1
+    p.selectedSeedType = "wheat"
+    p.energy = 5
+    p.selectedTool = 2
+    
+    local t = Tilemap.new()
+    local c = { tileToScreen = function() return 0,0 end, getTileScreenSize = function() return 32 end }
+    local i = { mode = "touch", getMouseTile = function() return 1, 1 end }
+    
+    -- Test rendering to ensure no crashes (like the nil bug)
+    local success, err = pcall(function()
+        h:draw(p, t, c, i)
+    end)
+    
+    _assert(success, "HUD renders without crashing")
+    if not success then print("HUD render error:", err) end
+    
+    -- Test cycling to an item without an emoji (scarecrow)
+    p.selectedSeedType = "scarecrow"
+    local success2, err2 = pcall(function()
+        h:draw(p, t, c, i)
+    end)
+    _assert(success2, "HUD renders without crashing on scarecrow")
+    if not success2 then print("HUD render error (scarecrow):", err2) end
+end
+
+testHUD()
 
 print("")
 print(string.rep("=", 60))

@@ -33,11 +33,14 @@ function Camera:update(dt, targetX, targetY)
     self.x = self.x + (goalX - self.x) * t
     self.y = self.y + (goalY - self.y) * t
 
-    -- Clamp to map bounds
+    -- Clamp to map bounds with safe margins for HUD occlusion avoidance
+    local SAFE_MARGIN_TOP = 120
+    local SAFE_MARGIN_BOTTOM = 80
     local maxX = self.mapWidth * TILE_SIZE * self.scale - self.screenWidth
     local maxY = self.mapHeight * TILE_SIZE * self.scale - self.screenHeight
+    
     self.x = math.max(0, math.min(self.x, maxX))
-    self.y = math.max(0, math.min(self.y, maxY))
+    self.y = math.max(-SAFE_MARGIN_TOP, math.min(self.y, maxY + SAFE_MARGIN_BOTTOM))
 end
 
 --- Apply camera transform before drawing world objects.

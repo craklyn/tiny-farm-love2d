@@ -22,7 +22,7 @@ local TitleScreen  = require("src.title_screen")
 local Crow = require("src.crow")
 
 -- Game state
-local gameState = "title"  -- "title", "playing"
+local gameState = "playing"  -- "title", "playing"
 local camera, input, tilemap, player, particles, dayCycle, hud, uiMenus
 
 local DEBUG_MODE = true
@@ -31,8 +31,8 @@ function love.load()
     -- Pixel art rendering: disable smoothing
     love.graphics.setDefaultFilter("nearest", "nearest")
     
-    -- Set up a pixel font style
-    local font = love.graphics.newFont(14)
+    -- Set up a pixel font style (larger for tablet accessibility)
+    local font = love.graphics.newFont(22)
     love.graphics.setFont(font)
     
     -- Set random seed
